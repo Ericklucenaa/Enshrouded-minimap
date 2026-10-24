@@ -21,6 +21,10 @@ Minimapa no canto da tela com a hora do jogo (sol de dia, lua de noite) e o clim
 | **+ / -** | Zoom |
 | **F9 / F11** | Diminui / aumenta o minimapa |
 
+## Desativar Altar de Chama pelo mapa
+
+No mapa-múndi, clique no ícone de um Altar de Chama seu e confirme com um segundo clique para desativá-lo de longe. Reative antes que ele se apague. Vem marcado no instalador (opção "Desativar Altar de Chama pelo mapa-múndi").
+
 ## Atualizações
 
 Quem abre o jogo pelo atalho **"Jogar Enshrouded com Painel"** recebe as versões novas sozinho: o atalho confere aqui se há versão nova, baixa, confere a assinatura do arquivo e atualiza antes de abrir o jogo, mantendo as opções de cada um.
@@ -39,6 +43,7 @@ Abra o `Instalar Minimap.bat` de novo e clique em **Desinstalar**. Antes de inst
 
 - **Shroudweave Minimap** — elxokker (original) e Aerox912 — [GitHub](https://github.com/Aerox912/Enshrouded-minimap) · [Nexus](https://www.nexusmods.com/enshrouded/mods/143)
 - **Shroudtopia** — s0t7x / Miguel Oppermann (original), versão de compatibilidade Shroudweave
+- **XHL Remote Altar Close** — XHL — [Nexus](https://www.nexusmods.com/enshrouded/mods/180)
 - Visual moderno, painel F8, instalador e atualização automática feitos para este pacote.
 
 Os mods incluídos são distribuídos sob a licença MIT; as licenças estão na pasta `arquivos\licencas` do instalador. Enshrouded é marca da Keen Games; este é um projeto independente da comunidade.
