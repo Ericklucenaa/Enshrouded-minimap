@@ -1,0 +1,50 @@
+﻿MINIMAPA E RELOGIO DO JOGO PARA ENSHROUDED
+==========================================
+
+Coloca um minimapa no canto da tela e, embaixo dele, a hora do jogo
+(sol de dia, lua de noite) e o clima. Tambem traz um painel dentro do jogo
+para mudar as opcoes do minimapa e permite desativar Altares de Chama
+pelo mapa-mundi.
+
+COMO INSTALAR
+1. Feche o Enshrouded.
+2. De dois cliques em "Instalar Minimap.bat".
+3. O instalador acha a pasta do jogo sozinho (se nao achar, clique em
+   "Procurar..." e escolha a pasta onde esta o enshrouded.exe).
+4. Escolha as opcoes e clique em "Instalar".
+5. Abra o jogo pelo atalho "Jogar Enshrouded com Painel" da Area de
+   Trabalho. E por ele que as atualizacoes chegam sozinhas.
+
+Se aparecer o aviso do Windows "O Windows protegeu o computador", clique em
+"Mais informacoes" e depois em "Executar assim mesmo".
+
+TECLAS NO JOGO
+  F8        abre / fecha o painel do minimapa
+            (setas para escolher e mudar, Esc fecha)
+  F10       mostrar / esconder o minimapa
+  + e -     zoom
+  F9 / F11  diminuir / aumentar o tamanho
+
+DESATIVAR ALTAR DE CHAMA PELO MAPA
+No mapa-mundi, clique no icone de um Altar de Chama seu e confirme com um
+segundo clique. Reative antes que ele se apague.
+
+PARA DESINSTALAR
+Abra o "Instalar Minimap.bat" de novo e clique em "Desinstalar".
+Antes de instalar ou desinstalar, o instalador guarda uma copia do que ja
+existia em: Documentos\Enshrouded Minimap Backups
+
+OBSERVACOES
+- Os mods so precisam estar no PC de quem joga; o servidor nao precisa de nada.
+- Precisa do Microsoft Visual C++ x64 (o instalador avisa e da o link se faltar).
+- Sao mods nao oficiais. Depois de uma atualizacao do Enshrouded eles podem
+  parar de funcionar ate os autores lancarem versoes novas.
+
+CREDITOS
+Shroudweave Minimap 0.5.15 - elxokker (original) e Aerox912
+  https://github.com/Aerox912/Enshrouded-minimap
+  https://www.nexusmods.com/enshrouded/mods/143
+Shroudtopia 0.2.1-shroudweave.1 - s0t7x / Miguel Oppermann (original)
+XHL Remote Altar Close 1.0.0 - XHL (licenca MIT)
+  https://www.nexusmods.com/enshrouded/mods/180
+Licencas (MIT) na pasta arquivos\licencas.

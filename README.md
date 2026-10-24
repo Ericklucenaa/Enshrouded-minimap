@@ -39,6 +39,11 @@ Abra o `Instalar Minimap.bat` de novo e clique em **Desinstalar**. Antes de inst
 - Precisa do Microsoft Visual C++ x64 (o instalador avisa e dá o link se faltar).
 - É um mod não oficial. Depois de uma atualização do Enshrouded ele pode parar de funcionar até sair uma versão nova.
 
+## O que tem neste repositório
+
+- [`instalador/`](instalador) — o pacote completo, igual ao das versões publicadas: minimapa, carregador Shroudtopia, desativador remoto de altar (XHL), painel F8 e o instalador. Também dá para baixar a pasta e rodar o `Instalar Minimap.bat`.
+- [`codigo/`](codigo) — código do painel F8, da atualização automática, do visual moderno, do instalador e do script de publicação.
+
 ## Créditos
 
 - **Shroudweave Minimap** — elxokker (original) e Aerox912 — [GitHub](https://github.com/Aerox912/Enshrouded-minimap) · [Nexus](https://www.nexusmods.com/enshrouded/mods/143)

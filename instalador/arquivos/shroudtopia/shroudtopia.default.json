@@ -1,0 +1,8 @@
+{
+  "active": true,
+  "bootDelay": 3000,
+  "updateDelay": 500,
+  "enableLogging": true,
+  "logLevel": "INFO",
+  "mods": {}
+}

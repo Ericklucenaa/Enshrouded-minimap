@@ -1,0 +1,7 @@
+Shroudtopia is based on the original Shroudtopia modloader by s0t7x / Miguel Oppermann.
+The original Shroudtopia MIT license is included as LICENSE.
+
+JSON for Modern C++ (nlohmann-json) is included in the build from its upstream
+MIT-licensed project. Its license notice is included as LICENSE-nlohmann-json.txt.
+
+Enshrouded is a trademark of Keen Games. This is an independent community project.

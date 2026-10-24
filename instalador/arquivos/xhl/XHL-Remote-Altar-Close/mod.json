@@ -1,0 +1,11 @@
+{
+  "id": "xhl-remote-altar-close",
+  "name": "XHL Remote Altar Close (1.0 Ready)",
+  "version": "1.0.0",
+  "capabilities": [],
+  "description": "Close a Flame Altar from the world map: click its icon and confirm with a second click. Reactivate it before it goes out.",
+  "authors": [
+    "XHL"
+  ],
+  "license": "MIT"
+}
