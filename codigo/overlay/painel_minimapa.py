@@ -3,11 +3,13 @@
 F8 (com o Enshrouded em foco) abre/fecha um painel ao lado do minimapa.
   Setas cima/baixo: escolher   Setas esquerda/direita ou Enter: mudar   Esc ou F8: fechar
 Cada mudanca vai direto para o shroudtopia.json, que o mod rele na hora.
+Tambem mostra o tempo restante dentro dos circulos de buff (buffs.py), se ligado no painel.
 
 A janela nunca pega o foco (o jogo continua ativo); as teclas chegam por um gancho de teclado
 que so segura as setas/Enter/Esc enquanto o painel esta aberto. Fecha sozinho junto com o jogo.
 """
 import ctypes
+import json
 import os
 import sys
 import time
@@ -16,11 +18,12 @@ from collections import deque
 from ctypes import wintypes
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from core.minimap import Minimap, find_game_dir  # noqa: E402
+from core.minimap import Minimap, find_game_dir, record_color_choice  # noqa: E402
+from buffs import BuffTimers  # noqa: E402
 
 # ---------- ajustes ----------
 GAME_EXE = 'enshrouded.exe'
-PANEL_KEY, PANEL_KEY_NAME = 0x77, 'F8'
+DEFAULT_PANEL_KEY = 0x77    # F8 (a tecla que abre o painel; pode ser remapeada)
 WIDTH = 400
 ROW_H = 34
 FONT = 'Segoe UI'
@@ -30,11 +33,92 @@ KEY_COLOR = '#010203'         # cor "invisivel" da janela (cantos arredondados)
 WAIT_FOR_GAME_MIN = 30
 GONE_GRACE_S = 120        # o jogo pode sumir e voltar ao iniciar pela Steam: so fecha depois de 2 min sem ele
 
+DEBUG = False   # True registra no painel.log o que acontece ao apertar F8 (diagnostico)
 VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT, VK_RETURN, VK_ESCAPE = 0x26, 0x28, 0x25, 0x27, 0x0D, 0x1B
 NAV_KEYS = {VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT, VK_RETURN, VK_ESCAPE}
 
 POSITIONS = [('bottom-right', 'Embaixo à direita'), ('middle-right', 'Meio à direita'), ('top-right', 'Em cima à direita'),
              ('top-left', 'Em cima à esquerda'), ('middle-left', 'Meio à esquerda'), ('bottom-left', 'Embaixo à esquerda')]
+COLOR_NAMES = {'ambar': 'Âmbar', 'azul': 'Azul', 'verde': 'Verde', 'vermelho': 'Vermelho', 'branco': 'Branco'}
+
+# teclas remapeaveis. _k_panel = a tecla que abre o painel (so do painel); as demais vao para o shroudtopia.json
+KEY_ITEMS = [('_k_panel', 'Tecla: abrir painel'), ('toggle_key', 'Tecla: mostrar/esconder'),
+             ('zoom_in_key', 'Tecla: + zoom'), ('zoom_out_key', 'Tecla: − zoom'),
+             ('size_decrease_key', 'Tecla: diminuir'), ('size_increase_key', 'Tecla: aumentar')]
+_VK_NAMES = {0x08: 'Backspace', 0x09: 'Tab', 0x0D: 'Enter', 0x20: 'Espaço', 0x25: '←', 0x26: '↑', 0x27: '→',
+             0x28: '↓', 0x2D: 'Insert', 0x2E: 'Delete', 0x24: 'Home', 0x23: 'End', 0x21: 'PageUp', 0x22: 'PageDown',
+             0xBB: '+', 0xBD: '-', 0xBC: ',', 0xBE: '.', 0xBF: '/', 0xC0: '`', 0xDB: '[', 0xDD: ']', 0xDC: '\\',
+             0xBA: ';', 0xDE: "'", 0x6A: '* num', 0x6B: '+ num', 0x6D: '- num', 0x6F: '/ num', 0x6E: '. num',
+             0xC1: '/ ABNT', 0xC2: '. num ABNT'}
+
+
+def vk_label(vk):
+    if not vk:
+        return 'nenhuma'
+    if 0x70 <= vk <= 0x87:
+        return 'F%d' % (vk - 0x6F)
+    if vk in _VK_NAMES:
+        return _VK_NAMES[vk]
+    if 0x41 <= vk <= 0x5A or 0x30 <= vk <= 0x39:
+        return chr(vk)
+    if 0x60 <= vk <= 0x69:
+        return '%d num' % (vk - 0x60)
+    return '0x%02X' % vk
+
+
+def vk_to_modfmt(vk):
+    return 'F%d' % (vk - 0x6F) if 0x70 <= vk <= 0x87 else '0x%02X' % vk
+
+
+def modfmt_to_vk(s):
+    if not s or s == 'none':
+        return None
+    if s[0] == 'F' and s[1:].isdigit():
+        return 0x6F + int(s[1:])
+    try:
+        return int(s, 16)
+    except (ValueError, TypeError):
+        return None
+
+
+def _opcoes_path():
+    return os.path.join(os.environ.get('LOCALAPPDATA', ''), 'EnshroudedMinimap', 'opcoes.json')
+
+
+def load_option(key, default=None):
+    try:
+        with open(_opcoes_path(), encoding='utf-8-sig') as f:
+            return json.load(f).get(key, default)
+    except (OSError, ValueError):
+        return default
+
+
+def load_panel_key():
+    try:
+        v = load_option('panel_key')
+        return int(v) if v else None
+    except (ValueError, TypeError):
+        return None
+
+
+def record_option(key, value):
+    try:
+        p = _opcoes_path()
+        if not os.path.isdir(os.path.dirname(p)):
+            return
+        o = {}
+        if os.path.exists(p):
+            with open(p, encoding='utf-8-sig') as f:
+                o = json.load(f)
+        o[key] = value
+        with open(p, 'w', encoding='utf-8') as f:
+            json.dump(o, f, ensure_ascii=False, indent=2)
+    except (OSError, ValueError):
+        pass
+
+
+def record_panel_key(vk):
+    record_option('panel_key', int(vk))
 
 # (chave, titulo, tipo, opcoes)  tipo: bool | cycle [(valor, rotulo)] | range (min, max, passo, sufixo)
 ITEMS = [
@@ -47,6 +131,7 @@ ITEMS = [
     ('show_fog_of_war', 'Névoa (não explorado)', 'bool', None),
     ('show_clock', 'Relógio', 'bool', None),
     ('show_weather', 'Clima', 'bool', None),
+    ('_buffs', 'Tempo dos buffs', 'bool', None),     # fica no opcoes.json, nao no shroudtopia.json
     ('max_icons', 'Máximo de ícones', 'range', (8, 128, 8, '')),
     ('position', 'Posição', 'cycle', POSITIONS),
     ('scale_percent', 'Tamanho', 'cycle', [(n, f'{n}%') for n in (50, 75, 100, 125, 150, 175, 200)]),
@@ -55,7 +140,8 @@ ITEMS = [
     ('icon_style', 'Ícones', 'cycle', [('original', 'Originais'), ('world-map', 'Moldura dourada')]),
     ('map_light', 'Brilho do terreno', 'range', (0, 100, 5, '')),
     ('map_sample_step', 'Nitidez', 'cycle', [(1, 'Alta'), (2, 'Padrão'), (3, 'Baixa')]),
-]
+    ('_color', 'Cor da moldura *', 'color', None),   # * vale ao reiniciar o jogo
+] + [(k, t, 'key', None) for k, t in KEY_ITEMS]
 
 user32 = ctypes.WinDLL('user32', use_last_error=True)
 kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
@@ -111,7 +197,12 @@ def game_running():
 class Panel:
     def __init__(self, minimap):
         self.mm = minimap
-        self.values = minimap.state()['values']
+        st = minimap.state()
+        self.values = st['values']
+        self.values['_color'] = st.get('color') or (minimap.colors() or [''])[0]
+        self.values['_buffs'] = bool(load_option('buffs', True))
+        self.panel_key = load_panel_key() or DEFAULT_PANEL_KEY
+        self.capturing = None   # item de tecla aguardando a nova tecla, ou None
         self.sel = 0
         self.open = False
         self.events = deque()
@@ -135,6 +226,7 @@ class Panel:
         self.hook = user32.SetWindowsHookExW(13, self._proc, kernel32.GetModuleHandleW(None), 0)
         if not self.hook:
             raise OSError(ctypes.get_last_error(), 'nao consegui instalar o atalho de teclado')
+        self.buffs = BuffTimers(self.root, enabled=lambda: self.values.get('_buffs', True))
         self.root.after(30, self.tick)
 
     def _no_activate(self):
@@ -148,7 +240,11 @@ class Panel:
         if n == 0:
             k = ctypes.cast(lparam, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents.vkCode
             down = wparam in (0x100, 0x104)
-            if k == PANEL_KEY and game_hwnd_in_front():
+            if self.capturing is not None and game_hwnd_in_front():
+                if down:                       # capturando: a proxima tecla vira o atalho
+                    self.events.append(('capture', k))
+                return 1
+            if k == self.panel_key and game_hwnd_in_front():
                 if down:
                     self.events.append('toggle')
                 return 1
@@ -160,8 +256,13 @@ class Panel:
 
     # ---- logica ----
     def handle(self, ev):
+        if isinstance(ev, tuple) and ev[0] == 'capture':
+            self._apply_capture(ev[1])
+            return
         if ev == 'toggle':
             self.open = not self.open
+            if DEBUG:
+                print(time.strftime('%H:%M:%S'), 'toggle -> painel', 'ABERTO' if self.open else 'fechado')
             if self.open:
                 self.reload_values()
             return
@@ -174,9 +275,54 @@ class Panel:
         elif ev in (VK_LEFT, VK_RIGHT, VK_RETURN):
             self.change(ITEMS[self.sel], -1 if ev == VK_LEFT else 1)
 
+    def _apply_capture(self, vk):
+        item = self.capturing
+        self.capturing = None
+        if item is None:
+            return
+        if vk == VK_ESCAPE:
+            self.flash('cancelado')
+            return
+        key = item[0]
+        if key == '_k_panel':
+            self.panel_key = vk
+            record_panel_key(vk)
+            self.flash('abrir painel: ' + vk_label(vk))
+            return
+        try:
+            self.mm.save({key: vk_to_modfmt(vk)})   # tecla do mod -> shroudtopia.json
+            self.values[key] = vk_to_modfmt(vk)
+            self.flash(vk_label(vk) + ' — pode pedir reiniciar')
+        except Exception as e:  # noqa: BLE001
+            self.flash('erro: ' + str(e)[:40])
+
     def change(self, item, step):
         key, _, kind, opts = item
         cur = self.values.get(key)
+        if kind == 'key':
+            self.capturing = item
+            self.flash('aperte a nova tecla (Esc cancela)')
+            return
+        if kind == 'color':
+            vals = self.mm.colors()
+            if not vals:
+                self.flash('sem cores disponíveis')
+                return
+            i = vals.index(cur) if cur in vals else 0
+            new = vals[(i + step) % len(vals)]
+            try:
+                self.mm.set_color(new)
+                record_color_choice(new)
+                self.values['_color'] = new
+                self.flash('cor: ' + COLOR_NAMES.get(new, new) + ' — reinicie o jogo')
+            except Exception as e:  # noqa: BLE001
+                self.flash('erro: ' + str(e)[:40])
+            return
+        if key == '_buffs':
+            self.values['_buffs'] = not cur
+            record_option('buffs', not cur)
+            self.flash('✔ tempo dos buffs ' + ('ligado' if not cur else 'desligado'))
+            return
         if kind == 'bool':
             new = not cur
         elif kind == 'cycle':
@@ -195,7 +341,11 @@ class Panel:
 
     def reload_values(self):
         try:
-            self.values = self.mm.state()['values']  # pega mudancas feitas pelo editor
+            st = self.mm.state()          # pega mudancas feitas pelo editor
+            buffs = self.values.get('_buffs', True)
+            self.values = st['values']
+            self.values['_color'] = st.get('color') or (self.mm.colors() or [''])[0]
+            self.values['_buffs'] = buffs
         except Exception:  # noqa: BLE001
             pass
 
@@ -208,6 +358,12 @@ class Panel:
         v = self.values.get(key)
         if kind == 'bool':
             return None
+        if kind == 'key':
+            if self.capturing is item:
+                return '[aperte…]'
+            return vk_label(self.panel_key) if key == '_k_panel' else vk_label(modfmt_to_vk(v))
+        if kind == 'color':
+            return COLOR_NAMES.get(v, v or '—')
         if kind == 'cycle':
             return dict(opts).get(v, str(v))
         return f'{v}{opts[3]}'
@@ -219,7 +375,7 @@ class Panel:
             w, h = 290, 44
             self._round(2, 2, w - 2, h - 2, 12, fill=C_BG, outline=C_LINE)
             cv.create_text(16, h / 2, anchor='w', text='Painel do minimapa:', fill=C_MUTED, font=(FONT, 11))
-            cv.create_text(w - 16, h / 2, anchor='e', text=PANEL_KEY_NAME, fill=C_ACCENT, font=(FONT, 12, 'bold'))
+            cv.create_text(w - 16, h / 2, anchor='e', text=vk_label(self.panel_key), fill=C_ACCENT, font=(FONT, 12, 'bold'))
             return w, h
         head, foot = 58, 46
         w, h = WIDTH, head + ROW_H * len(ITEMS) + foot
@@ -227,7 +383,7 @@ class Panel:
         cv.create_text(20, 22, anchor='w', text='Minimapa', fill=C_TEXT, font=(FONT, 15, 'bold'))
         cv.create_text(20, 43, anchor='w', text='mudanças valem na hora', fill=C_MUTED, font=(FONT, 9))
         self._round(w - 58, 13, w - 18, 37, 8, fill=C_ACCENT, outline='')
-        cv.create_text(w - 38, 25, text=PANEL_KEY_NAME, fill='#1a1206', font=(FONT, 10, 'bold'))
+        cv.create_text(w - 38, 25, text=vk_label(self.panel_key), fill='#1a1206', font=(FONT, 10, 'bold'))
         dim = not self.values.get('active', True)
         for i, item in enumerate(ITEMS):
             y = head + i * ROW_H
@@ -325,6 +481,8 @@ class Panel:
             self.hint_until = now + 5
         show_hint = game and not self.open and now < self.hint_until
         visible = bool(game and (self.open or show_hint))
+        if DEBUG and self.open and changed:
+            print(time.strftime('%H:%M:%S'), 'desenho: jogo_em_foco=%s visivel=%s' % (bool(game), visible))
         if visible:
             w, h = self.draw(hint_only=not self.open)
             self.place(w, h, game)
@@ -371,8 +529,12 @@ def main():
         if atualizador.run_with_window():
             sys.exit(0)  # o instalador fecha/atualiza e reabre este programa com o jogo
     game_dir = installed_game_dir() or find_game_dir()
-    app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    mm = Minimap(game_dir, os.path.join(app_dir, 'minimap_visual'))
+    if getattr(sys, 'frozen', False):
+        # no .exe instalado as cores da moldura ficam em %LOCALAPPDATA%\EnshroudedMinimap (cores/)
+        visual_dir = os.path.join(os.environ.get('LOCALAPPDATA', ''), 'EnshroudedMinimap')
+    else:
+        visual_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'minimap_visual')
+    mm = Minimap(game_dir, visual_dir)
     if not mm.installed():
         sys.exit('Minimapa nao instalado')
     if abrir_jogo:

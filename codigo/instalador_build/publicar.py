@@ -27,7 +27,7 @@ ZIP_NAME = 'Instalador-Minimap-Enshrouded.zip'               # sem espacos: o Gi
 CONFIG = os.path.join(HERE, 'publicar.json')                   # {"repo": "usuario/repositorio"}
 GH = shutil.which('gh') or os.path.expandvars(
     r'%LOCALAPPDATA%\Microsoft\WinGet\Packages\GitHub.cli_Microsoft.Winget.Source_8wekyb3d8bbwe\bin\gh.exe')
-CHECKED_DIRS = ('shroudtopia', 'minimap_mod', 'visual_moderno', 'painel', 'xhl')
+CHECKED_DIRS = ('shroudtopia', 'minimap_mod', 'visual_moderno', 'painel', 'xhl', 'cores')
 
 
 def sha256(path):
@@ -53,6 +53,11 @@ def assemble(version, repo):
     os.makedirs(os.path.join(PKG, 'visual_moderno'), exist_ok=True)
     for f in ('embervale_minimap_frame.rgba', 'embervale_player_arrow.rgba'):
         shutil.copy2(os.path.join(APP, 'minimap_visual', 'saida', f), os.path.join(PKG, 'visual_moderno', f))
+    # cores da moldura (o instalador coloca em %LOCALAPPDATA%\EnshroudedMinimap\cores para o painel trocar)
+    cores_pkg = os.path.join(PKG, 'cores')
+    if os.path.isdir(cores_pkg):
+        shutil.rmtree(cores_pkg)
+    shutil.copytree(os.path.join(APP, 'minimap_visual', 'cores'), cores_pkg)
     with open(os.path.join(PKG, 'versao.json'), 'w', encoding='utf-8') as f:
         json.dump({'versao': version, 'repo': repo}, f, indent=2)
     lines = []

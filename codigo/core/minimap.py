@@ -115,7 +115,8 @@ class Minimap:
             values['map_style'] = 'default'
         return {'installed': True, 'game_dir': self.game_dir, 'values': values,
                 'defaults': self.defaults(), 'visual': self.visual(),
-                'visual_available': {k: self._has_visual(k) for k in ('moderno', 'original')}}
+                'visual_available': {k: self._has_visual(k) for k in ('moderno', 'original')},
+                'colors': self.colors(), 'color': self.current_color()}
 
     def save(self, changes):
         if not self.installed():
@@ -140,29 +141,65 @@ class Minimap:
         return clean
 
     # ---- visual (moldura + seta) ----
+    #  'moderno' = o visual novo, que vem em varias cores (pasta cores/<cor>/)
+    #  'original' = o bronze que veio no mod (pasta original/)
     def _visual_src(self, kind):
         return os.path.join(self.visual_dir, {'moderno': 'saida', 'original': 'original'}[kind])
 
     def _has_visual(self, kind):
         return all(os.path.exists(os.path.join(self._visual_src(kind), f)) for f in VISUAL_FILES)
 
+    @property
+    def _cores_dir(self):
+        return os.path.join(self.visual_dir, 'cores')
+
+    def colors(self):
+        d = self._cores_dir
+        if not os.path.isdir(d):
+            return []
+        return [n for n in sorted(os.listdir(d))
+                if all(os.path.exists(os.path.join(d, n, f)) for f in VISUAL_FILES)]
+
+    def _sha_mod(self):
+        return [_sha(os.path.join(self.mod_dir, f)) for f in VISUAL_FILES]
+
+    def current_color(self):
+        cur = self._sha_mod()
+        for name in self.colors():
+            if cur == [_sha(os.path.join(self._cores_dir, name, f)) for f in VISUAL_FILES]:
+                return name
+        return None
+
     def visual(self):
-        cur = [_sha(os.path.join(self.mod_dir, f)) for f in VISUAL_FILES]
+        cur = self._sha_mod()
+        if self.current_color() is not None:
+            return 'moderno'
         for kind in ('moderno', 'original'):
             if self._has_visual(kind) and cur == [_sha(os.path.join(self._visual_src(kind), f)) for f in VISUAL_FILES]:
                 return kind
         return 'outro'
 
+    def _backup_original(self):
+        orig = self._visual_src('original')
+        if self.visual() == 'outro' and not self._has_visual('original'):
+            os.makedirs(orig, exist_ok=True)   # nunca perde o visual que estava instalado
+            for f in VISUAL_FILES:
+                shutil.copy2(os.path.join(self.mod_dir, f), os.path.join(orig, f))
+
+    def _apply(self, src_dir):
+        self._backup_original()
+        for f in VISUAL_FILES:
+            shutil.copy2(os.path.join(src_dir, f), os.path.join(self.mod_dir, f))
+
     def set_visual(self, kind):
         if kind not in ('moderno', 'original') or not self._has_visual(kind):
             raise ValueError('Visual indisponivel')
-        orig = self._visual_src('original')
-        if self.visual() == 'outro' and not self._has_visual('original'):
-            os.makedirs(orig, exist_ok=True)  # nunca perde o visual que estava instalado
-            for f in VISUAL_FILES:
-                shutil.copy2(os.path.join(self.mod_dir, f), os.path.join(orig, f))
-        for f in VISUAL_FILES:
-            shutil.copy2(os.path.join(self._visual_src(kind), f), os.path.join(self.mod_dir, f))
+        self._apply(self._visual_src(kind))
+
+    def set_color(self, name):
+        if name not in self.colors():
+            raise ValueError('Cor indisponivel')
+        self._apply(os.path.join(self._cores_dir, name))
 
 
 def _sha(path):
@@ -171,3 +208,21 @@ def _sha(path):
             return hashlib.sha256(f.read()).hexdigest()
     except OSError:
         return None
+
+
+def record_color_choice(name):
+    """Guarda a cor escolhida no opcoes.json do instalador, para a atualizacao nao reseta-la."""
+    try:
+        d = os.path.join(os.environ.get('LOCALAPPDATA', ''), 'EnshroudedMinimap')
+        if not os.path.isdir(d):
+            return
+        p = os.path.join(d, 'opcoes.json')
+        o = {}
+        if os.path.exists(p):
+            with open(p, encoding='utf-8-sig') as f:
+                o = json.load(f)
+        o['color'] = name
+        with open(p, 'w', encoding='utf-8') as f:
+            json.dump(o, f, ensure_ascii=False, indent=2)
+    except (OSError, ValueError):
+        pass

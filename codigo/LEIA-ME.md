@@ -5,6 +5,9 @@ Código das partes feitas para este pacote. Os mods de terceiros (minimapa, Shro
 | Arquivo | O que é |
 |---|---|
 | `overlay/painel_minimapa.py` | Painel F8 dentro do jogo. Janela por cima do jogo que não rouba o foco; muda o `shroudtopia.json`, que o minimapa relê na hora. |
+| `overlay/buffs.py` | Tempo restante dentro dos círculos de buff. Roda como janela do painel F8 (ou sozinho com `python overlay/buffs.py`). |
+| `core/efeitos.py` | Lê os efeitos ativos (buffs) do bloco `player_character` do save: duração total e restante em nanossegundos e o item que deu o efeito. |
+| `core/ksd.py`, `core/character.py` | Leitura do container de save `.ksd` (SV2C, blocos zstd) e do bloco do personagem. |
 | `overlay/atualizador.py` | Atualização automática: confere `releases/latest/download/versao.json`, baixa o .zip, confere o SHA-256 e chama o instalador em modo `-Atualizar`. |
 | `core/minimap.py` | Lê, valida e grava as opções do minimapa; troca o visual (moderno/original). |
 | `minimap_visual/gerar_visual.py` | Gera a moldura e a seta do visual moderno (`.rgba`, mesmo formato do mod). |
@@ -15,7 +18,7 @@ O instalador em si é [`../instalador/arquivos/instalador.ps1`](../instalador/ar
 ## Compilar o painel
 
 ```
-pip install pyinstaller
+pip install pyinstaller xxhash zstandard
 python instalador_build/publicar.py 1.2.3 --repo Ericklucenaa/Enshrouded-minimap
 ```
 

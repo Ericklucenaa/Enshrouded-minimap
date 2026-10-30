@@ -164,6 +164,27 @@ function Set-Visual($game, $kind, $log) {
     & $log 'Visual moderno aplicado (moldura e seta).'
 }
 
+function Deploy-Cores($log) {
+    # leva as cores da moldura para %LOCALAPPDATA%\EnshroudedMinimap\cores (o painel F8 troca entre elas)
+    $src = Join-Path $PKG 'cores'
+    if (-not (Test-Path -LiteralPath $src)) { return }
+    $dst = Join-Path $LOCAL_DIR 'cores'
+    if (Test-Path -LiteralPath $dst) { Remove-Item -LiteralPath $dst -Recurse -Force }
+    Copy-Item -LiteralPath $src -Destination $dst -Recurse -Force
+}
+
+function Apply-Color($game, $color, $log) {
+    # aplica a cor escolhida (moldura + seta). Sem cores/ ou sem cor, fica o padrao que o Set-Visual ja copiou.
+    if (-not $color) { return }
+    $src = Join-Path $LOCAL_DIR "cores\$color"
+    if (-not (Test-Path -LiteralPath $src)) { return }
+    foreach ($f in $VISUAL_FILES) {
+        $sf = Join-Path $src $f
+        if (Test-Path -LiteralPath $sf) { Copy-Item -LiteralPath $sf -Destination (Join-Path $game "mods\$MOD_ID") -Force }
+    }
+    & $log "Cor da moldura: $color."
+}
+
 function Stop-Panel {
     $p = @(Get-Process PainelMinimapa -ErrorAction SilentlyContinue)
     $p | Stop-Process -Force -ErrorAction SilentlyContinue
@@ -178,10 +199,10 @@ function Copy-WithRetry($src, $dst) {
     }
 }
 
-function Save-LocalInfo($game, $visual, $painel, $altar) {
+function Save-LocalInfo($game, $visual, $painel, $altar, $color) {
     New-Item -ItemType Directory -Force -Path $LOCAL_DIR | Out-Null
     Copy-Item -LiteralPath (Join-Path $PKG 'versao.json') -Destination (Join-Path $LOCAL_DIR 'versao.json') -Force
-    $o = [ordered]@{ game_dir = $game; visual = $visual; painel = [bool]$painel; altar = [bool]$altar }
+    $o = [ordered]@{ game_dir = $game; visual = $visual; painel = [bool]$painel; altar = [bool]$altar; color = $color }
     [IO.File]::WriteAllText((Join-Path $LOCAL_DIR 'opcoes.json'), ($o | ConvertTo-Json), (New-Object Text.UTF8Encoding $false))
 }
 
@@ -189,6 +210,7 @@ function Install-Panel($game, $log) {
     Stop-Panel
     New-Item -ItemType Directory -Force -Path $LOCAL_DIR | Out-Null
     Copy-WithRetry (Join-Path $PKG 'painel\PainelMinimapa.exe') $PANEL_EXE
+    Deploy-Cores $log
     $sh = (New-Object -ComObject WScript.Shell).CreateShortcut($SHORTCUT)
     $sh.TargetPath = $PANEL_EXE
     $sh.Arguments = '--abrir-jogo'
@@ -311,10 +333,12 @@ if ($Atualizar) {
         Install-Minimap $game $null $log
         Set-Visual $game $o.visual $log
         if ($o.painel) { Install-Panel $game $log }
+        $color = if ($o.color) { $o.color } else { 'ambar' }
+        Apply-Color $game $color $log
         # quem instalou antes do altar existir (sem a opcao salva) recebe o altar na atualizacao
         $altar = if ($null -eq $o.altar) { $true } else { [bool]$o.altar }
         if ($altar) { Install-Altar $game $log } else { Remove-Altar $game $log }
-        Save-LocalInfo $game $o.visual $o.painel $altar
+        Save-LocalInfo $game $o.visual $o.painel $altar $color
         & $log ('Atualizado para a versão ' + (Get-Content -LiteralPath (Join-Path $PKG 'versao.json') -Raw | ConvertFrom-Json).versao)
     } catch {
         & $log ('ERRO na atualização: ' + $_.Exception.Message)
@@ -507,8 +531,11 @@ $btnInstall.Add_Click({
         Install-Minimap $g $opts $log
         Set-Visual $g $visual $log
         if ($chkPanel.Checked) { Install-Panel $g $log } else { Remove-Panel $log }
+        $color = try { (Get-Content -LiteralPath (Join-Path $LOCAL_DIR 'opcoes.json') -Raw | ConvertFrom-Json).color } catch { $null }
+        if (-not $color) { $color = 'ambar' }
+        Apply-Color $g $color $log
         if ($chkAltar.Checked) { Install-Altar $g $log } else { Remove-Altar $g $log }
-        Save-LocalInfo $g $visual $chkPanel.Checked $chkAltar.Checked
+        Save-LocalInfo $g $visual $chkPanel.Checked $chkAltar.Checked $color
         & $log 'PRONTO!'
         $how = if ($chkPanel.Checked) { "Abra o jogo pelo atalho 'Jogar Enshrouded com Painel' na Área de Trabalho.`nDentro do jogo, F8 abre o painel do minimapa.`nAs atualizações chegam sozinhas por esse atalho." } else { 'Abra o Enshrouded normalmente pela Steam e entre no mundo.' }
         [Windows.Forms.MessageBox]::Show("Instalado!`n`n$how`n`n" +

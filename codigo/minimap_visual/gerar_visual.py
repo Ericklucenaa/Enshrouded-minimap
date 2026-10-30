@@ -1,32 +1,40 @@
-"""Gera a moldura e a seta do minimapa (Shroudweave Minimap) num estilo moderno.
+"""Gera a moldura e a seta do minimapa (Shroudweave Minimap).
 
-Saida: saida/embervale_minimap_frame.rgba (1024x1024) e saida/embervale_player_arrow.rgba (512x512),
-RGBA 8 bits sem alfa pre-multiplicado, o mesmo formato dos arquivos originais do mod.
-Tambem gera saida/preview.png comparando com o visual original.
+Anel fino e discreto, com um MARCADOR DE NORTE FIXO (triangulo da cor de destaque,
+sem letras) que fica legivel mesmo com o mapa girando. A cor de destaque e um
+parametro, entao geramos varias versoes em cores/<cor>/ para trocar dentro do jogo.
 
-Medidas da moldura original (raio em px, centro 512): o mapa aparece ate ~r=360 e o anel
-opaco vai de ~360 a ~440. O anel novo precisa cobrir a borda do mapa nessa mesma faixa.
+Saida: cores/<cor>/embervale_minimap_frame.rgba (1024x1024) e .../embervale_player_arrow.rgba
+(512x512), RGBA 8 bits (mesmo formato do mod). saida/ recebe a cor padrao (ambar).
 """
 import math
 import os
+import shutil
 import sys
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageFilter
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, 'saida')
+CORES = os.path.join(HERE, 'cores')
 MOD = r'C:\Program Files (x86)\Steam\steamapps\common\Enshrouded\mods\minimap_mod'
 
-# ---------- estilo ----------
-ACCENT = (255, 181, 71)          # ambar: pilula do N e brilho da seta
-RING_TOP = (30, 38, 47)           # anel: tom de cima ...
-RING_BOTTOM = (11, 15, 20)        # ... e de baixo (efeito vidro)
-RING_ALPHA = 0.90
-R_INNER, R_OUTER = 364.0, 410.0   # anel; no jogo o mapa aparece ate ~r=372 e continua por baixo do anel
-LETTERS = {'N': -90, 'L': 0, 'S': 90, 'O': 180}   # pontos cardeais em portugues
-FONT_BOLD = r'C:\Windows\Fonts\segoeuib.ttf'
-FONT_SEMI = r'C:\Windows\Fonts\seguisb.ttf'
+# cores de destaque (so o marcador de norte e o brilho da seta mudam de cor)
+COLORS = {
+    'ambar': (255, 181, 71),
+    'azul': (86, 196, 255),
+    'verde': (82, 214, 130),
+    'vermelho': (255, 96, 96),
+    'branco': (236, 242, 250),
+}
+DEFAULT_COLOR = 'ambar'
+
+RING_TOP = (30, 38, 47)
+RING_BOTTOM = (11, 15, 20)
+RING_ALPHA = 0.88
+R_INNER, R_OUTER = 369.0, 400.0   # anel mais fino (31 px) do que antes
+CARDINALS = {'N': -90, 'E': 0, 'S': 90, 'W': 180}  # so o N ganha o marcador grande
 
 SIZE = 1024
 C = SIZE / 2
@@ -38,13 +46,10 @@ def smoothstep(e0, e1, x):
 
 
 def band(r, a, b, aa=0.75):
-    """1 dentro de [a,b], com borda suavizada (anti-aliasing analitico)."""
     return smoothstep(a - aa, a + aa, r) * (1 - smoothstep(b - aa, b + aa, r))
 
 
 class Canvas:
-    """Acumula camadas em RGBA pre-multiplicado (float) e devolve RGBA reto em 8 bits."""
-
     def __init__(self, size):
         self.rgb = np.zeros((size, size, 3), np.float32)
         self.a = np.zeros((size, size), np.float32)
@@ -67,67 +72,65 @@ class Canvas:
         return Image.fromarray(out, 'RGBA')
 
 
-def frame():
+def frame(accent):
     y, x = np.mgrid[0:SIZE, 0:SIZE].astype(np.float32) + 0.5
     r = np.hypot(x - C, y - C)
     cv = Canvas(SIZE)
 
-    # sombra externa e sombra interna (da profundidade ao mapa)
-    cv.over((0, 0, 0), 0.42 * (1 - smoothstep(R_OUTER - 2, R_OUTER + 34, r)) * (r > R_OUTER - 2))
-    cv.over((0, 0, 0), 0.38 * smoothstep(R_INNER - 26, R_INNER, r) * (r < R_INNER + 1))
+    # sombras externa e interna (profundidade)
+    cv.over((0, 0, 0), 0.36 * (1 - smoothstep(R_OUTER - 2, R_OUTER + 30, r)) * (r > R_OUTER - 2))
+    cv.over((0, 0, 0), 0.34 * smoothstep(R_INNER - 22, R_INNER, r) * (r < R_INNER + 1))
 
-    # anel de vidro escuro com degrade vertical
+    # anel escuro fino com leve degrade (efeito vidro)
     t = np.clip((y - (C - R_OUTER)) / (2 * R_OUTER), 0, 1)[..., None]
     ring_col = (np.array(RING_TOP) * (1 - t) + np.array(RING_BOTTOM) * t)
     cv.over(ring_col, RING_ALPHA * band(r, R_INNER, R_OUTER))
+    # filetes claros discretos
+    cv.over((255, 255, 255), 0.30 * band(r, R_INNER, R_INNER + 1.8, 0.6))
+    cv.over((255, 255, 255), 0.10 * band(r, R_OUTER - 1.4, R_OUTER, 0.6))
 
-    # filetes claros nas bordas do anel
-    cv.over((255, 255, 255), 0.42 * band(r, R_INNER, R_INNER + 2.2, 0.6))
-    cv.over((255, 255, 255), 0.13 * band(r, R_OUTER - 1.6, R_OUTER, 0.6))
-
-    # marcas a cada 10 graus (maiores a cada 30), sem passar por cima das letras
-    hi = Image.new('RGBA', (SIZE * 4, SIZE * 4))
+    # detalhes em alta resolucao (4x) e depois reduz
+    k = 4
+    hi = Image.new('RGBA', (SIZE * k, SIZE * k))
     d = ImageDraw.Draw(hi)
-    for deg in range(0, 360, 10):
-        if any(abs(((deg - (ang % 360)) + 180) % 360 - 180) < 12 for ang in LETTERS.values()):
-            continue
-        major = deg % 30 == 0
-        r0, r1 = (R_OUTER - 15, R_OUTER - 6) if major else (R_OUTER - 11, R_OUTER - 6)
-        th = math.radians(deg)
-        p0 = (4 * (C + r0 * math.cos(th)), 4 * (C + r0 * math.sin(th)))
-        p1 = (4 * (C + r1 * math.cos(th)), 4 * (C + r1 * math.sin(th)))
-        d.line([p0, p1], fill=(255, 255, 255, 150 if major else 75), width=9 if major else 6)
 
-    # pontos cardeais
-    rc = (R_INNER + R_OUTER) / 2
-    for letter, ang in LETTERS.items():
+    def P(ang, rad):
         th = math.radians(ang)
-        cx, cy = 4 * (C + rc * math.cos(th)), 4 * (C + rc * math.sin(th))
-        # no jogo a moldura aparece com ~1/3 do tamanho: letras pequenas aqui somem la
-        if letter == 'N':
-            rad = 4 * 34
-            d.ellipse([cx - rad, cy - rad, cx + rad, cy + rad], fill=ACCENT + (255,))
-            d.ellipse([cx - rad, cy - rad, cx + rad, cy + rad], outline=(255, 255, 255, 120), width=8)
-            font, fill = ImageFont.truetype(FONT_BOLD, 4 * 42), (24, 16, 6, 255)
-        else:
-            rad = 4 * 27
-            d.ellipse([cx - rad, cy - rad, cx + rad, cy + rad], fill=(12, 16, 21, 245),
-                      outline=(255, 255, 255, 70), width=8)
-            font, fill = ImageFont.truetype(FONT_SEMI, 4 * 32), (235, 240, 245, 240)
-        d.text((cx, cy), letter, font=font, fill=fill, anchor='mm')
+        return (k * (C + rad * math.cos(th)), k * (C + rad * math.sin(th)))
+
+    # marcas discretas a cada 30 graus (menos no N, que tem o marcador)
+    for deg in range(0, 360, 30):
+        if abs(((deg - (-90 % 360)) + 180) % 360 - 180) < 16:
+            continue
+        cardinal = deg % 90 == 0
+        r0 = R_INNER + (7 if cardinal else 10)
+        d.line([P(deg, r0), P(deg, R_OUTER - 5)], fill=(226, 234, 242, 190 if cardinal else 90),
+               width=k * (5 if cardinal else 3))
+
+    # MARCADOR DE NORTE: triangulo da cor de destaque, apontando para fora (sem letra)
+    tip = P(-90, R_OUTER + 7)
+    halfw = 15
+    base_l = P(-90 - halfw, R_INNER + 1)
+    base_r = P(-90 + halfw, R_INNER + 1)
+    d.polygon([tip, base_r, base_l], fill=(10, 13, 18, 255))          # contorno escuro
+    tip2 = P(-90, R_OUTER + 2)
+    bl2 = P(-90 - halfw + 2, R_INNER + 5)
+    br2 = P(-90 + halfw - 2, R_INNER + 5)
+    d.polygon([tip2, br2, bl2], fill=accent + (255,))                 # preenchimento colorido
+
     cv.over_image(hi.resize((SIZE, SIZE), Image.LANCZOS))
     return cv.to_image()
 
 
-def arrow():
-    S, k = 512, 4  # desenha 4x maior e reduz (bordas lisas)
-    pts = [(256, 40), (420, 452), (256, 362), (92, 452)]   # um pouco menor que a original: sobra espaco p/ o brilho
+def arrow(accent):
+    S, k = 512, 4
+    pts = [(256, 40), (420, 452), (256, 362), (92, 452)]
     big = [(x * k, y * k) for x, y in pts]
 
     glow = Image.new('RGBA', (S * k, S * k))
     gd = ImageDraw.Draw(glow)
-    gd.polygon(big, fill=ACCENT + (255,))
-    gd.line(big + [big[0]], fill=ACCENT + (255,), width=k * 34, joint='curve')
+    gd.polygon(big, fill=accent + (255,))
+    gd.line(big + [big[0]], fill=accent + (255,), width=k * 34, joint='curve')
     glow = glow.filter(ImageFilter.GaussianBlur(k * 12))
     ga = np.asarray(glow, np.float32).copy()
     ga[..., 3] = np.minimum(ga[..., 3] * 1.6, 235)
@@ -135,23 +138,20 @@ def arrow():
 
     body = Image.new('RGBA', (S * k, S * k))
     d = ImageDraw.Draw(body)
-    d.polygon(big, fill=(10, 14, 19, 255))                 # contorno escuro (le bem em mapa claro)
+    d.polygon(big, fill=(10, 14, 19, 255))
     inset = shrink(pts, 15)
-    d.polygon([(x * k, y * k) for x, y in inset], fill=(255, 255, 255, 255))
-    # metade direita levemente sombreada: da volume sem enfeite
-    right = [inset[0], inset[1], inset[2]]
-    d.polygon([(x * k, y * k) for x, y in right], fill=(214, 224, 234, 255))
+    d.polygon([(px * k, py * k) for px, py in inset], fill=(255, 255, 255, 255))
+    d.polygon([(inset[0][0] * k, inset[0][1] * k), (inset[1][0] * k, inset[1][1] * k),
+               (inset[2][0] * k, inset[2][1] * k)], fill=(214, 224, 234, 255))
 
-    out = Image.alpha_composite(glow, body)
-    return out.resize((S, S), Image.LANCZOS)
+    return Image.alpha_composite(glow, body).resize((S, S), Image.LANCZOS)
 
 
 def shrink(pts, dist):
-    """Recuo simples de um poligono convexo/seta em direcao ao centroide das bordas."""
     n = len(pts)
-    lines = []
     cx = sum(p[0] for p in pts) / n
     cy = sum(p[1] for p in pts) / n
+    lines = []
     for i in range(n):
         (x0, y0), (x1, y1) = pts[i], pts[(i + 1) % n]
         nx, ny = y1 - y0, -(x1 - x0)
@@ -163,45 +163,47 @@ def shrink(pts, dist):
     for i in range(n):
         (p, dp), (q, dq) = lines[i - 1], lines[i]
         den = dp[0] * dq[1] - dp[1] * dq[0]
-        t = ((q[0] - p[0]) * dq[1] - (q[1] - p[1]) * dq[0]) / den
-        res.append((p[0] + dp[0] * t, p[1] + dp[1] * t))
+        tt = ((q[0] - p[0]) * dq[1] - (q[1] - p[1]) * dq[0]) / den
+        res.append((p[0] + dp[0] * tt, p[1] + dp[1] * tt))
     return res
 
 
-def preview(frame_img, arrow_img, path):
-    """Mostra moldura nova x original sobre um pedaco do mapa real do mod."""
-    def disc(frame_im, arrow_im):
-        raw = open(os.path.join(MOD, 'embervale_realmap_default_2048.rgba'), 'rb').read()
-        world = Image.frombytes('RGBA', (2048, 2048), raw).convert('RGB')
-        crop = world.crop((760, 1180, 760 + 190, 1180 + 190)).resize((95, 95), Image.BILINEAR)
-        crop = crop.resize((760, 760), Image.NEAREST)          # imita o "pixelado" do map_sample_step
+def preview(path):
+    """Amostra das cores sobre um pedaco do mapa real, no tamanho do jogo."""
+    raw = open(os.path.join(MOD, 'embervale_realmap_default_2048.rgba'), 'rb').read()
+    world = Image.frombytes('RGBA', (2048, 2048), raw).convert('RGB')
+    crop = world.crop((760, 1180, 950, 1370)).resize((95, 95), Image.BILINEAR).resize((760, 760), Image.NEAREST)
+    cells = []
+    for name in COLORS:
+        f = frame(COLORS[name]); a = arrow(COLORS[name])
         base = Image.new('RGBA', (SIZE, SIZE), (24, 22, 20, 255))
         mask = Image.new('L', (SIZE, SIZE))
         ImageDraw.Draw(mask).ellipse([C - 372, C - 372, C + 372, C + 372], fill=255)
         layer = Image.new('RGBA', (SIZE, SIZE)); layer.paste(crop, (int(C - 380), int(C - 380)))
         base.paste(layer, (0, 0), mask)
-        base.alpha_composite(frame_im)
-        a = arrow_im.resize((96, 96), Image.LANCZOS)
-        base.alpha_composite(a, (int(C - 48), int(C - 48)))
-        return base
-
-    orig_f = Image.frombytes('RGBA', (1024, 1024), open(os.path.join(MOD, 'embervale_minimap_frame.rgba'), 'rb').read())
-    orig_a = Image.frombytes('RGBA', (512, 512), open(os.path.join(MOD, 'embervale_player_arrow.rgba'), 'rb').read())
-    sheet = Image.new('RGBA', (2 * SIZE, SIZE), (24, 22, 20, 255))
-    sheet.paste(disc(orig_f, orig_a), (0, 0))
-    sheet.paste(disc(frame_img, arrow_img), (SIZE, 0))
-    sheet.convert('RGB').resize((SIZE, SIZE // 2), Image.LANCZOS).save(path)
+        base.alpha_composite(f)
+        base.alpha_composite(a.resize((96, 96), Image.LANCZOS), (int(C - 48), int(C - 48)))
+        cells.append(base.resize((360, 360), Image.LANCZOS))
+    sheet = Image.new('RGBA', (360 * len(cells), 360), (18, 20, 24, 255))
+    for i, c in enumerate(cells):
+        sheet.paste(c, (360 * i, 0))
+    sheet.convert('RGB').save(path)
 
 
 def main():
+    os.makedirs(CORES, exist_ok=True)
+    for name, accent in COLORS.items():
+        d = os.path.join(CORES, name)
+        os.makedirs(d, exist_ok=True)
+        open(os.path.join(d, 'embervale_minimap_frame.rgba'), 'wb').write(frame(accent).tobytes())
+        open(os.path.join(d, 'embervale_player_arrow.rgba'), 'wb').write(arrow(accent).tobytes())
+    # saida/ = cor padrao (o instalador empacota isto como "visual_moderno")
     os.makedirs(OUT, exist_ok=True)
-    f, a = frame(), arrow()
-    assert f.size == (1024, 1024) and a.size == (512, 512)
-    open(os.path.join(OUT, 'embervale_minimap_frame.rgba'), 'wb').write(f.tobytes())
-    open(os.path.join(OUT, 'embervale_player_arrow.rgba'), 'wb').write(a.tobytes())
+    for fn in ('embervale_minimap_frame.rgba', 'embervale_player_arrow.rgba'):
+        shutil.copy2(os.path.join(CORES, DEFAULT_COLOR, fn), os.path.join(OUT, fn))
     if '--sem-preview' not in sys.argv:
-        preview(f, a, os.path.join(OUT, 'preview.png'))
-    print('gerado em', OUT)
+        preview(os.path.join(OUT, 'preview.png'))
+    print('gerado:', ', '.join(COLORS), '| padrao:', DEFAULT_COLOR)
 
 
 if __name__ == '__main__':

@@ -21,6 +21,14 @@ Minimapa no canto da tela com a hora do jogo (sol de dia, lua de noite) e o clim
 | **+ / -** | Zoom |
 | **F9 / F11** | Diminui / aumenta o minimapa |
 
+## Tempo dos buffs
+
+Mostra quanto falta para acabar cada buff de comida, água e poção, dentro do próprio círculo do buff (canto superior esquerdo). Fica amarelo nos últimos 5 minutos e vermelho no último minuto. Liga e desliga no painel **F8** → **Tempo dos buffs**.
+
+- O tempo vem do save do personagem, que o jogo grava a cada ~30 s; entre uma gravação e outra a contagem segue em tempo real.
+- Descansado e Toque da Pata não entram: o jogo já mostra o tempo deles em texto.
+- Precisa do jogo em **Janela sem bordas**. A posição foi medida em 2560×1440 e se ajusta a outras resoluções pela altura da tela.
+
 ## Desativar Altar de Chama pelo mapa
 
 No mapa-múndi, clique no ícone de um Altar de Chama seu e confirme com um segundo clique para desativá-lo de longe. Reative antes que ele se apague. Vem marcado no instalador (opção "Desativar Altar de Chama pelo mapa-múndi").
