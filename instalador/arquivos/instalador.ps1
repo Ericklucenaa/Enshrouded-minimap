@@ -1,16 +1,22 @@
-﻿# Instalador do Shroudweave Minimap 0.5.15 + Shroudtopia 0.2.1 para Enshrouded.
-# Compatível com Windows PowerShell 5.1 (já vem no Windows 10/11). Aberto pelo "Instalar Minimap.bat".
-# -Atualizar: modo silencioso chamado pelo PainelMinimapa.exe quando há versão nova no GitHub.
+﻿# Instalador do Melhorias Enshrouded: Shroudweave Minimap 0.5.15 + Shroudtopia 0.2.1, painel F8,
+# tempo dos buffs, editor de save e desativador remoto de altar (XHL).
+# Compatível com Windows PowerShell 5.1 (já vem no Windows 10/11). Aberto pelo "Instalar Melhorias.bat".
+# -Atualizar: modo silencioso chamado pelo painel (.exe) quando há versão nova no GitHub.
 param([switch]$Atualizar)
 
 $ErrorActionPreference = 'Stop'
 $PKG = $PSScriptRoot
+$APP_NAME = 'Melhorias Enshrouded'
 $MOD_ID = 'minimap_mod'
 $DLLS = @('winmm.dll', 'shroudtopia.dll')
 $BACKUP_ROOT = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'Enshrouded Minimap Backups'
 $LOCAL_DIR = Join-Path $env:LOCALAPPDATA 'EnshroudedMinimap'   # painel, versão instalada e opções escolhidas
-$PANEL_EXE = Join-Path $LOCAL_DIR 'PainelMinimapa.exe'
-$SHORTCUT = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Jogar Enshrouded com Painel.lnk'
+$PANEL_NAMES = @('MelhoriasEnshrouded', 'PainelMinimapa')     # nome atual e o de antes da 1.4.0
+$PANEL_EXE = Join-Path $LOCAL_DIR 'MelhoriasEnshrouded.exe'
+$DESKTOP = [Environment]::GetFolderPath('Desktop')
+$SHORTCUT = Join-Path $DESKTOP 'Jogar Enshrouded (Melhorias).lnk'
+$EDITOR_SHORTCUT = Join-Path $DESKTOP 'Editor de Save Enshrouded.lnk'
+$OLD_FILES = @((Join-Path $LOCAL_DIR 'PainelMinimapa.exe'), (Join-Path $DESKTOP 'Jogar Enshrouded com Painel.lnk'))
 $VISUAL_FILES = @('embervale_minimap_frame.rgba', 'embervale_player_arrow.rgba')
 $VISUALS = [ordered]@{ 'Moderno (recomendado)' = 'moderno'; 'Original (bronze)' = 'original' }
 $ALTAR_DIR = 'XHL-Remote-Altar-Close'      # desativador remoto de altar (XHL), carregado pelo dinput8.dll do XHL
@@ -186,7 +192,7 @@ function Apply-Color($game, $color, $log) {
 }
 
 function Stop-Panel {
-    $p = @(Get-Process PainelMinimapa -ErrorAction SilentlyContinue)
+    $p = @(Get-Process $PANEL_NAMES -ErrorAction SilentlyContinue)
     $p | Stop-Process -Force -ErrorAction SilentlyContinue
     $p | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
 }
@@ -199,33 +205,65 @@ function Copy-WithRetry($src, $dst) {
     }
 }
 
-function Save-LocalInfo($game, $visual, $painel, $altar, $color) {
+function Read-LocalOptions {
+    try { return (Get-Content -LiteralPath (Join-Path $LOCAL_DIR 'opcoes.json') -Raw | ConvertFrom-Json) } catch { return $null }
+}
+
+function Save-LocalInfo($game, $visual, $painel, $altar, $color, $buffs, $editor) {
     New-Item -ItemType Directory -Force -Path $LOCAL_DIR | Out-Null
     Copy-Item -LiteralPath (Join-Path $PKG 'versao.json') -Destination (Join-Path $LOCAL_DIR 'versao.json') -Force
-    $o = [ordered]@{ game_dir = $game; visual = $visual; painel = [bool]$painel; altar = [bool]$altar; color = $color }
+    # mantém o que o painel grava sozinho (tecla do painel etc.) e atualiza o resto
+    $o = [ordered]@{}
+    $old = Read-LocalOptions
+    if ($old) { foreach ($p in $old.PSObject.Properties) { $o[$p.Name] = $p.Value } }
+    $new = [ordered]@{ game_dir = $game; visual = $visual; painel = [bool]$painel; altar = [bool]$altar; color = $color
+                       buffs = [bool]$buffs; editor = [bool]$editor }
+    foreach ($k in $new.Keys) { $o[$k] = $new[$k] }
     [IO.File]::WriteAllText((Join-Path $LOCAL_DIR 'opcoes.json'), ($o | ConvertTo-Json), (New-Object Text.UTF8Encoding $false))
 }
 
-function Install-Panel($game, $log) {
+function New-Shortcut($path, $arguments, $desc, $icon) {
+    $sh = (New-Object -ComObject WScript.Shell).CreateShortcut($path)
+    $sh.TargetPath = $PANEL_EXE
+    $sh.Arguments = $arguments
+    $sh.WorkingDirectory = $LOCAL_DIR
+    $sh.Description = $desc
+    $sh.IconLocation = $icon
+    $sh.Save()
+}
+
+function Remove-OldNames($log) {
+    # até a 1.3.0 o programa se chamava PainelMinimapa.exe e o atalho "Jogar Enshrouded com Painel"
+    $had = $false
+    foreach ($p in $OLD_FILES) { if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Force; $had = $true } }
+    if ($had) { & $log 'Nomes antigos (PainelMinimapa) removidos.' }
+}
+
+function Install-Panel($game, $editor, $log) {
     Stop-Panel
     New-Item -ItemType Directory -Force -Path $LOCAL_DIR | Out-Null
-    Copy-WithRetry (Join-Path $PKG 'painel\PainelMinimapa.exe') $PANEL_EXE
+    Copy-WithRetry (Join-Path $PKG 'painel\MelhoriasEnshrouded.exe') $PANEL_EXE
+    Remove-OldNames $log
     Deploy-Cores $log
-    $sh = (New-Object -ComObject WScript.Shell).CreateShortcut($SHORTCUT)
-    $sh.TargetPath = $PANEL_EXE
-    $sh.Arguments = '--abrir-jogo'
-    $sh.WorkingDirectory = $LOCAL_DIR
-    $sh.Description = 'Abre o Enshrouded com o painel do minimapa (F8) e mantém o minimapa atualizado'
-    $sh.IconLocation = (Join-Path $game 'enshrouded.exe') + ',0'
-    $sh.Save()
-    & $log 'Painel F8 instalado e atalho "Jogar Enshrouded com Painel" criado na Área de Trabalho.'
+    New-Shortcut $SHORTCUT '--abrir-jogo' "Abre o Enshrouded com o $APP_NAME (painel F8, tempo dos buffs) e mantém tudo atualizado" `
+        ((Join-Path $game 'enshrouded.exe') + ',0')
+    & $log 'Painel F8 instalado e atalho "Jogar Enshrouded (Melhorias)" criado na Área de Trabalho.'
+    if ($editor) {
+        New-Shortcut $EDITOR_SHORTCUT '--editor' 'Editor de save do Enshrouded (abre no navegador)' "$PANEL_EXE,0"
+        & $log 'Atalho "Editor de Save Enshrouded" criado na Área de Trabalho.'
+    } elseif (Test-Path -LiteralPath $EDITOR_SHORTCUT) {
+        Remove-Item -LiteralPath $EDITOR_SHORTCUT -Force
+        & $log 'Atalho do editor de save removido.'
+    }
 }
 
 function Remove-Panel($log) {
     Stop-Panel
     $had = $false
-    foreach ($p in $PANEL_EXE, $SHORTCUT) { if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Force; $had = $true } }
-    if ($had) { & $log 'Painel F8 e atalho removidos.' }
+    foreach ($p in @($PANEL_EXE, $SHORTCUT, $EDITOR_SHORTCUT) + $OLD_FILES) {
+        if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Force; $had = $true }
+    }
+    if ($had) { & $log 'Painel F8 e atalhos removidos.' }
 }
 
 function Test-IsXhlCore($path) {
@@ -326,19 +364,21 @@ if ($Atualizar) {
     try {
         $o = Get-Content -LiteralPath (Join-Path $LOCAL_DIR 'opcoes.json') -Raw | ConvertFrom-Json
         $game = $o.game_dir
-        for ($i = 0; $i -lt 40 -and (Get-Process PainelMinimapa -ErrorAction SilentlyContinue); $i++) { Start-Sleep -Milliseconds 500 }
+        for ($i = 0; $i -lt 40 -and (Get-Process $PANEL_NAMES -ErrorAction SilentlyContinue); $i++) { Start-Sleep -Milliseconds 500 }
         if (Test-GameRunning $game) { throw 'o jogo está aberto; tento de novo na próxima vez' }
         $bad = Test-Package
         if ($bad.Count) { throw ('pacote corrompido: ' + ($bad -join ', ')) }
+        # quem instalou antes de uma opção existir (sem ela salva) recebe a novidade ligada
+        $altar = if ($null -eq $o.altar) { $true } else { [bool]$o.altar }
+        $buffs = if ($null -eq $o.buffs) { $true } else { [bool]$o.buffs }
+        $editor = if ($null -eq $o.editor) { $true } else { [bool]$o.editor }
         Install-Minimap $game $null $log
         Set-Visual $game $o.visual $log
-        if ($o.painel) { Install-Panel $game $log }
+        if ($o.painel) { Install-Panel $game $editor $log }
         $color = if ($o.color) { $o.color } else { 'ambar' }
         Apply-Color $game $color $log
-        # quem instalou antes do altar existir (sem a opcao salva) recebe o altar na atualizacao
-        $altar = if ($null -eq $o.altar) { $true } else { [bool]$o.altar }
         if ($altar) { Install-Altar $game $log } else { Remove-Altar $game $log }
-        Save-LocalInfo $game $o.visual $o.painel $altar $color
+        Save-LocalInfo $game $o.visual $o.painel $altar $color $buffs $editor
         & $log ('Atualizado para a versão ' + (Get-Content -LiteralPath (Join-Path $PKG 'versao.json') -Raw | ConvertFrom-Json).versao)
     } catch {
         & $log ('ERRO na atualização: ' + $_.Exception.Message)
@@ -362,86 +402,124 @@ if ($Atualizar) {
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 [Windows.Forms.Application]::EnableVisualStyles()
 
+function Rgb($hex) { [Drawing.ColorTranslator]::FromHtml($hex) }
+$C_BG = Rgb '#0c1116'; $C_BODY = Rgb '#111820'; $C_CARD = Rgb '#18212b'; $C_LINE = Rgb '#263443'
+$C_TEXT = Rgb '#eef3f8'; $C_MUTED = Rgb '#8d9cad'; $C_ACCENT = Rgb '#ffb547'; $C_ON_ACCENT = Rgb '#1a1206'
+$C_OK = Rgb '#6fd39a'; $C_WARN = Rgb '#ffb547'; $C_ERR = Rgb '#ff7b6e'
+$VERSION = try { (Get-Content -LiteralPath (Join-Path $PKG 'versao.json') -Raw | ConvertFrom-Json).versao } catch { '' }
+
 $font = New-Object Drawing.Font('Segoe UI', 9.5)
 $form = New-Object Windows.Forms.Form
-$form.Text = 'Instalador — Minimapa e Relógio para Enshrouded'
-$form.ClientSize = New-Object Drawing.Size(600, 690)
+$form.Text = "$APP_NAME — Instalador"
+$form.ClientSize = New-Object Drawing.Size(640, 768)
 $form.StartPosition = 'CenterScreen'
-$form.FormBorderStyle = 'FixedDialog'
+$form.FormBorderStyle = 'FixedSingle'
 $form.MaximizeBox = $false
 $form.Font = $font
-$form.BackColor = [Drawing.Color]::White
+$form.BackColor = $C_BODY
+$form.ForeColor = $C_TEXT
 
-function Add-Control($ctrl, $x, $y, $w, $h) {
+function Add-To($parent, $ctrl, $x, $y, $w, $h) {
     $ctrl.Location = New-Object Drawing.Point($x, $y)
     if ($w) { $ctrl.Size = New-Object Drawing.Size($w, $h) }
-    $form.Controls.Add($ctrl); return $ctrl
+    $parent.Controls.Add($ctrl); return $ctrl
+}
+function New-Label($text, $color, $size = 9.5, $style = 'Regular') {
+    $l = New-Object Windows.Forms.Label
+    $l.Text = $text; $l.ForeColor = $color; $l.AutoSize = $true; $l.BackColor = [Drawing.Color]::Transparent
+    $l.Font = New-Object Drawing.Font('Segoe UI', $size, [Drawing.FontStyle]$style)
+    return $l
+}
+function New-Card($title, $y, $h) {
+    $p = New-Object Windows.Forms.Panel
+    $p.BackColor = $C_CARD
+    Add-To $form $p 20 $y 600 $h | Out-Null
+    Add-To $p (New-Label $title $C_ACCENT 8.5 'Bold') 16 12 | Out-Null
+    return $p
+}
+function Set-FlatButton($b, $bg, $fg, $border) {
+    $b.FlatStyle = 'Flat'; $b.BackColor = $bg; $b.ForeColor = $fg; $b.Cursor = 'Hand'
+    $b.FlatAppearance.BorderColor = $border; $b.FlatAppearance.BorderSize = 1
+    $b.FlatAppearance.MouseOverBackColor = [Drawing.Color]::FromArgb([Math]::Min(255, $bg.R + 18), [Math]::Min(255, $bg.G + 18), [Math]::Min(255, $bg.B + 18))
 }
 
+# cabeçalho
 $header = New-Object Windows.Forms.Panel
-$header.BackColor = [Drawing.Color]::FromArgb(28, 38, 48)
-Add-Control $header 0 0 600 74 | Out-Null
-$title = New-Object Windows.Forms.Label
-$title.Text = 'Minimapa e Relógio do Jogo'
-$title.Font = New-Object Drawing.Font('Segoe UI Semibold', 16)
-$title.ForeColor = [Drawing.Color]::White
-$title.AutoSize = $true
-$title.Location = New-Object Drawing.Point(18, 10)
-$header.Controls.Add($title)
-$sub = New-Object Windows.Forms.Label
-$sub.Text = 'Shroudweave Minimap 0.5.15 + Shroudtopia 0.2.1 para Enshrouded'
-$sub.ForeColor = [Drawing.Color]::FromArgb(190, 205, 215)
-$sub.AutoSize = $true
-$sub.Location = New-Object Drawing.Point(20, 44)
-$header.Controls.Add($sub)
+$header.BackColor = $C_BG
+Add-To $form $header 0 0 640 100 | Out-Null
+$accentBar = New-Object Windows.Forms.Panel
+$accentBar.BackColor = $C_ACCENT
+Add-To $header $accentBar 0 97 640 3 | Out-Null
+Add-To $header (New-Label $APP_NAME $C_TEXT 20 'Bold') 22 14 | Out-Null
+Add-To $header (New-Label 'Minimapa com relógio do jogo, tempo dos buffs, editor de save e painel F8' $C_MUTED 9.5) 25 56 | Out-Null
+if ($VERSION) {
+    $ver = New-Label "v$VERSION" $C_ON_ACCENT 9 'Bold'
+    $ver.BackColor = $C_ACCENT; $ver.Padding = New-Object Windows.Forms.Padding(6, 2, 6, 2)
+    Add-To $header $ver 560 22 | Out-Null
+}
 
-$lblGame = Add-Control (New-Object Windows.Forms.Label) 18 88 560 20
-$lblGame.Text = 'Pasta do Enshrouded:'
-$txtGame = Add-Control (New-Object Windows.Forms.TextBox) 18 110 460 26
-$btnBrowse = Add-Control (New-Object Windows.Forms.Button) 486 108 96 28
+# pasta do jogo
+Add-To $form (New-Label 'PASTA DO JOGO' $C_MUTED 8.5 'Bold') 20 114 | Out-Null
+$txtGame = Add-To $form (New-Object Windows.Forms.TextBox) 20 136 494 28
+$txtGame.BackColor = $C_BG; $txtGame.ForeColor = $C_TEXT; $txtGame.BorderStyle = 'FixedSingle'
+$txtGame.Font = New-Object Drawing.Font('Segoe UI', 10)
+$btnBrowse = Add-To $form (New-Object Windows.Forms.Button) 522 135 98 28
 $btnBrowse.Text = 'Procurar...'
-$lblGameStatus = Add-Control (New-Object Windows.Forms.Label) 18 140 564 20
+Set-FlatButton $btnBrowse $C_CARD $C_TEXT $C_LINE
+$lblGameStatus = Add-To $form (New-Object Windows.Forms.Label) 20 170 600 20
 
-$grp = Add-Control (New-Object Windows.Forms.GroupBox) 18 168 564 262
-$grp.Text = 'Opções'
-function Add-Combo($label, $map, $y) {
-    $l = New-Object Windows.Forms.Label; $l.Text = $label; $l.Location = New-Object Drawing.Point(14, ($y + 4)); $l.AutoSize = $true
-    $c = New-Object Windows.Forms.ComboBox; $c.DropDownStyle = 'DropDownList'
-    $c.Location = New-Object Drawing.Point(170, $y); $c.Size = New-Object Drawing.Size(240, 26)
+# minimapa
+$cardMap = New-Card 'MINIMAPA' 198 178
+function Add-Combo($label, $map, $x, $y) {
+    Add-To $cardMap (New-Label $label $C_MUTED 9) $x $y | Out-Null
+    $c = New-Object Windows.Forms.ComboBox
+    $c.DropDownStyle = 'DropDownList'; $c.FlatStyle = 'Flat'
+    $c.BackColor = $C_BG; $c.ForeColor = $C_TEXT
     foreach ($k in $map.Keys) { [void]$c.Items.Add($k) }
     $c.SelectedIndex = 0
-    $grp.Controls.Add($l); $grp.Controls.Add($c); return $c
+    return (Add-To $cardMap $c $x ($y + 20) 270 26)
 }
-$cbPos = Add-Combo 'Posição na tela:' $POSITIONS 26
-$cbOri = Add-Combo 'Orientação do mapa:' $ORIENTATIONS 60
-$cbSty = Add-Combo 'Cores do mapa:' $STYLES 94
-$cbVis = Add-Combo 'Visual da moldura:' $VISUALS 128
-function Add-Check($text, $x, $y = 166) {
-    $c = New-Object Windows.Forms.CheckBox; $c.Text = $text; $c.Checked = $true; $c.AutoSize = $true
-    $c.Location = New-Object Drawing.Point($x, $y); $grp.Controls.Add($c); return $c
+$cbPos = Add-Combo 'Posição na tela' $POSITIONS 16 38
+$cbOri = Add-Combo 'Orientação do mapa' $ORIENTATIONS 312 38
+$cbSty = Add-Combo 'Cores do mapa' $STYLES 16 90
+$cbVis = Add-Combo 'Visual da moldura' $VISUALS 312 90
+function New-Check($parent, $text, $x, $y) {
+    $c = New-Object Windows.Forms.CheckBox
+    $c.Text = $text; $c.Checked = $true; $c.AutoSize = $true
+    $c.ForeColor = $C_TEXT; $c.FlatStyle = 'Flat'; $c.Cursor = 'Hand'
+    $c.FlatAppearance.BorderColor = $C_LINE; $c.FlatAppearance.CheckedBackColor = $C_ACCENT
+    return (Add-To $parent $c $x $y)
 }
-$chkClock = Add-Check 'Relógio do jogo' 14
-$chkWeather = Add-Check 'Clima' 170
-$chkFog = Add-Check 'Esconder áreas não exploradas' 260
-$chkPanel = Add-Check 'Painel F8 dentro do jogo + atalho na Área de Trabalho (com atualização automática)' 14 198
-$chkAltar = Add-Check 'Desativar Altar de Chama pelo mapa-múndi (mod XHL)' 14 228
+$chkClock = New-Check $cardMap 'Relógio do jogo' 16 146
+$chkWeather = New-Check $cardMap 'Clima' 170 146
+$chkFog = New-Check $cardMap 'Esconder áreas não exploradas' 270 146
 
-$lblVc = Add-Control (New-Object Windows.Forms.LinkLabel) 18 440 564 20
+# melhorias
+$cardExtra = New-Card 'MELHORIAS' 388 166
+$chkPanel = New-Check $cardExtra 'Painel F8 no jogo + atalho na Área de Trabalho (com atualização automática)' 16 38
+$chkBuffs = New-Check $cardExtra 'Tempo dos buffs dentro dos círculos (comida, água e poções)' 36 68
+$chkEditor = New-Check $cardExtra 'Editor de save (atalho "Editor de Save Enshrouded")' 36 96
+$chkAltar = New-Check $cardExtra 'Desativar Altar de Chama pelo mapa-múndi (mod XHL)' 16 128
 
-$btnInstall = Add-Control (New-Object Windows.Forms.Button) 18 468 200 38
+$lblVc = Add-To $form (New-Object Windows.Forms.LinkLabel) 20 564 600 20
+$lblVc.LinkColor = $C_ACCENT; $lblVc.ActiveLinkColor = $C_ACCENT
+
+# botões
+$btnInstall = Add-To $form (New-Object Windows.Forms.Button) 20 592 220 42
 $btnInstall.Text = 'Instalar'
-$btnInstall.Font = New-Object Drawing.Font('Segoe UI Semibold', 11)
-$btnInstall.BackColor = [Drawing.Color]::FromArgb(46, 125, 50)
-$btnInstall.ForeColor = [Drawing.Color]::White
-$btnInstall.FlatStyle = 'Flat'
-$btnUninstall = Add-Control (New-Object Windows.Forms.Button) 228 468 140 38
+$btnInstall.Font = New-Object Drawing.Font('Segoe UI', 11, [Drawing.FontStyle]::Bold)
+Set-FlatButton $btnInstall $C_ACCENT $C_ON_ACCENT $C_ACCENT
+$btnUninstall = Add-To $form (New-Object Windows.Forms.Button) 250 592 150 42
 $btnUninstall.Text = 'Desinstalar'
-$btnClose = Add-Control (New-Object Windows.Forms.Button) 482 468 100 38
+Set-FlatButton $btnUninstall $C_BODY $C_TEXT $C_LINE
+$btnClose = Add-To $form (New-Object Windows.Forms.Button) 520 592 100 42
 $btnClose.Text = 'Fechar'
+Set-FlatButton $btnClose $C_BODY $C_MUTED $C_BODY
 
-$txtLog = Add-Control (New-Object Windows.Forms.TextBox) 18 518 564 154
+$txtLog = Add-To $form (New-Object Windows.Forms.TextBox) 20 648 600 104
 $txtLog.Multiline = $true; $txtLog.ReadOnly = $true; $txtLog.ScrollBars = 'Vertical'
-$txtLog.BackColor = [Drawing.Color]::FromArgb(245, 247, 249)
+$txtLog.BackColor = $C_BG; $txtLog.ForeColor = $C_MUTED; $txtLog.BorderStyle = 'None'
+$txtLog.Font = New-Object Drawing.Font('Consolas', 9)
 
 $log = { param($m) $txtLog.AppendText((Get-Date -Format 'HH:mm:ss') + '  ' + $m + "`r`n"); [Windows.Forms.Application]::DoEvents() }
 
@@ -450,19 +528,24 @@ function Select-ByValue($combo, $map, $value) {
     foreach ($k in $map.Keys) { if ($map[$k] -eq $value) { $combo.SelectedIndex = $i; return }; $i++ }
 }
 
+function Update-PanelDeps {
+    # tempo dos buffs e editor rodam dentro do painel: sem ele, ficam desligados
+    foreach ($c in $chkBuffs, $chkEditor) { $c.Enabled = $chkPanel.Checked; $c.ForeColor = $(if ($chkPanel.Checked) { $C_TEXT } else { $C_MUTED }) }
+}
+
 function Update-GameStatus {
     $g = $txtGame.Text.Trim()
     $ok = $g -and (Test-Path -LiteralPath (Join-Path $g 'enshrouded.exe'))
     if (-not $ok) {
-        $lblGameStatus.ForeColor = [Drawing.Color]::Firebrick
+        $lblGameStatus.ForeColor = $C_ERR
         $lblGameStatus.Text = '✖ enshrouded.exe não está nessa pasta. Use "Procurar..." e escolha a pasta do jogo.'
         $btnInstall.Enabled = $false; $btnUninstall.Enabled = $false; return
     }
     $installed = Test-Path -LiteralPath (Join-Path $g "mods\$MOD_ID\minimap_mod.dll")
-    $lblGameStatus.ForeColor = [Drawing.Color]::ForestGreen
-    $lblGameStatus.Text = '✔ Jogo encontrado.' + $(if ($installed) { ' O minimapa já está instalado: "Instalar" atualiza/reconfigura.' } else { '' })
+    $lblGameStatus.ForeColor = $C_OK
+    $lblGameStatus.Text = '✔ Jogo encontrado.' + $(if ($installed) { ' Já está instalado: "Aplicar" atualiza e reconfigura.' } else { '' })
     $btnInstall.Enabled = $true; $btnUninstall.Enabled = $installed
-    $btnInstall.Text = $(if ($installed) { 'Reinstalar / Aplicar' } else { 'Instalar' })
+    $btnInstall.Text = $(if ($installed) { 'Aplicar' } else { 'Instalar' })
     try {
         $cfg = Read-Config $g
         $e = if ($cfg -and $cfg.mods) { $cfg.mods.$MOD_ID } else { $null }
@@ -475,12 +558,15 @@ function Update-GameStatus {
             if ($null -ne $e.show_fog_of_war) { $chkFog.Checked = [bool]$e.show_fog_of_war }
         }
     } catch { & $log "Aviso: não consegui ler o shroudtopia.json atual ($($_.Exception.Message))." }
-    try {
-        $o = Get-Content -LiteralPath (Join-Path $LOCAL_DIR 'opcoes.json') -Raw | ConvertFrom-Json
+    $o = Read-LocalOptions
+    if ($o) {  # sem opcoes.json (primeira instalação) fica tudo ligado
         Select-ByValue $cbVis $VISUALS $o.visual
         $chkPanel.Checked = [bool]$o.painel
         if ($null -ne $o.altar) { $chkAltar.Checked = [bool]$o.altar }
-    } catch { }  # primeira instalação: fica o padrão (moderno + painel)
+        if ($null -ne $o.buffs) { $chkBuffs.Checked = [bool]$o.buffs }
+        if ($null -ne $o.editor) { $chkEditor.Checked = [bool]$o.editor }
+    }
+    Update-PanelDeps
 }
 
 function Confirm-Ready($g) {
@@ -508,6 +594,7 @@ $btnBrowse.Add_Click({
     if ($dlg.ShowDialog() -eq 'OK') { $txtGame.Text = $dlg.SelectedPath }
 })
 $txtGame.Add_TextChanged({ Update-GameStatus })
+$chkPanel.Add_CheckedChanged({ Update-PanelDeps })
 $lblVc.Add_LinkClicked({ Start-Process 'https://aka.ms/vc14/vc_redist.x64.exe' })
 $btnClose.Add_Click({ $form.Close() })
 
@@ -528,20 +615,28 @@ $btnInstall.Add_Click({
         $opts = @{ position = $POSITIONS[$cbPos.SelectedItem]; orientation = $ORIENTATIONS[$cbOri.SelectedItem]
                    style = $STYLES[$cbSty.SelectedItem]; clock = $chkClock.Checked; weather = $chkWeather.Checked; fog = $chkFog.Checked }
         $visual = $VISUALS[$cbVis.SelectedItem]
+        $panel = $chkPanel.Checked
+        $buffs = $panel -and $chkBuffs.Checked
+        $editor = $panel -and $chkEditor.Checked
         Install-Minimap $g $opts $log
         Set-Visual $g $visual $log
-        if ($chkPanel.Checked) { Install-Panel $g $log } else { Remove-Panel $log }
-        $color = try { (Get-Content -LiteralPath (Join-Path $LOCAL_DIR 'opcoes.json') -Raw | ConvertFrom-Json).color } catch { $null }
-        if (-not $color) { $color = 'ambar' }
+        if ($panel) { Install-Panel $g $editor $log } else { Remove-Panel $log }
+        $o = Read-LocalOptions
+        $color = if ($o -and $o.color) { $o.color } else { 'ambar' }
         Apply-Color $g $color $log
         if ($chkAltar.Checked) { Install-Altar $g $log } else { Remove-Altar $g $log }
-        Save-LocalInfo $g $visual $chkPanel.Checked $chkAltar.Checked $color
+        Save-LocalInfo $g $visual $panel $chkAltar.Checked $color $buffs $editor
         & $log 'PRONTO!'
-        $how = if ($chkPanel.Checked) { "Abra o jogo pelo atalho 'Jogar Enshrouded com Painel' na Área de Trabalho.`nDentro do jogo, F8 abre o painel do minimapa.`nAs atualizações chegam sozinhas por esse atalho." } else { 'Abra o Enshrouded normalmente pela Steam e entre no mundo.' }
+        $how = if ($panel) {
+            "Abra o jogo pelo atalho 'Jogar Enshrouded (Melhorias)' na Área de Trabalho.`n" +
+            "Dentro do jogo, F8 abre o painel (Tab troca de aba).`nAs atualizações chegam sozinhas por esse atalho." +
+            $(if ($buffs) { "`n`nTempo dos buffs: aparece dentro dos círculos de comida/água (jogo em Janela sem bordas)." } else { '' }) +
+            $(if ($editor) { "`nEditor de save: atalho 'Editor de Save Enshrouded' (abre no navegador)." } else { '' })
+        } else { 'Abra o Enshrouded normalmente pela Steam e entre no mundo.' }
         [Windows.Forms.MessageBox]::Show("Instalado!`n`n$how`n`n" +
-            "F10: mostrar/esconder`n+ / - : zoom`nF9 / F11: diminuir / aumentar" +
+            "F10: mostrar/esconder o minimapa`n+ / - : zoom`nF9 / F11: diminuir / aumentar" +
             $(if ($chkAltar.Checked) { "`n`nAltar: no mapa-múndi, clique no Altar de Chama e confirme com um segundo clique." } else { '' }),
-            'Pronto', 'OK', 'Information') | Out-Null
+            $APP_NAME, 'OK', 'Information') | Out-Null
     } catch {
         & $log ('ERRO: ' + $_.Exception.Message)
         [Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Erro', 'OK', 'Error') | Out-Null
@@ -551,9 +646,9 @@ $btnInstall.Add_Click({
 $btnUninstall.Add_Click({
     $g = $txtGame.Text.Trim()
     if (-not (Confirm-Ready $g)) { return }
-    $r = [Windows.Forms.MessageBox]::Show('Remover o minimapa? Um backup é feito antes.', 'Desinstalar', 'YesNo', 'Question')
+    $r = [Windows.Forms.MessageBox]::Show("Remover o $APP_NAME? Um backup é feito antes.", 'Desinstalar', 'YesNo', 'Question')
     if ($r -ne 'Yes') { return }
-    try { Uninstall-Minimap $g $log; & $log 'Minimapa desinstalado.' }
+    try { Uninstall-Minimap $g $log; & $log "$APP_NAME desinstalado." }
     catch { & $log ('ERRO: ' + $_.Exception.Message); [Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Erro', 'OK', 'Error') | Out-Null }
     finally { Update-GameStatus }
 })
@@ -571,11 +666,11 @@ $form.Add_Shown({
     if (Test-VcRedist) {
         $lblVc.Text = '✔ Visual C++ x64 instalado (necessário para o mod).'
         $lblVc.LinkArea = New-Object Windows.Forms.LinkArea(0, 0)
-        $lblVc.ForeColor = [Drawing.Color]::ForestGreen
+        $lblVc.ForeColor = $C_OK
     } else {
         $lblVc.Text = '⚠ Falta o Visual C++ x64 (o mod precisa dele). Clique aqui para baixar e instalar.'
         $lblVc.LinkArea = New-Object Windows.Forms.LinkArea(46, 25)
-        $lblVc.ForeColor = [Drawing.Color]::DarkOrange
+        $lblVc.ForeColor = $C_WARN
     }
     $btnInstall.Select()  # sem isso a primeira lista fica com o foco e pode abrir sozinha
 })

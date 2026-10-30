@@ -1,11 +1,12 @@
-"""Monta (e opcionalmente publica no GitHub) uma versao nova do instalador do minimapa.
+"""Monta (e opcionalmente publica no GitHub) uma versao nova do Melhorias Enshrouded.
 
 Uso:
   python instalador_build/publicar.py 1.0.1                     # so monta o .zip
   python instalador_build/publicar.py 1.0.1 --publicar --notas "o que mudou"
 
-Passos: recompila o PainelMinimapa.exe, copia o visual moderno, grava a versao, refaz o
-SHA256SUMS do pacote, gera o .zip e o versao.json que os PCs dos amigos consultam em
+Passos: recompila o MelhoriasEnshrouded.exe (painel F8 + tempo dos buffs + editor de save),
+copia o visual moderno, grava a versao, refaz o SHA256SUMS do pacote, gera o .zip e o
+versao.json que os PCs dos amigos consultam em
 https://github.com/<repo>/releases/latest/download/versao.json
 """
 import argparse
@@ -20,10 +21,11 @@ import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.dirname(HERE)                                   # EnshroudedEditor
-PKG_ROOT = os.path.join(HERE, 'pacote', 'Instalador Minimap Enshrouded')  # copia de trabalho do pacote
+PKG_ROOT = os.path.join(HERE, 'pacote', 'Melhorias Enshrouded')  # copia de trabalho do pacote
 PKG = os.path.join(PKG_ROOT, 'arquivos')
 OUT = os.path.join(HERE, 'release')
-ZIP_NAME = 'Instalador-Minimap-Enshrouded.zip'               # sem espacos: o GitHub troca espaco por ponto
+ZIP_NAME = 'Melhorias-Enshrouded.zip'                          # sem espacos: o GitHub troca espaco por ponto
+EXE_NAME = 'MelhoriasEnshrouded'
 CONFIG = os.path.join(HERE, 'publicar.json')                   # {"repo": "usuario/repositorio"}
 GH = shutil.which('gh') or os.path.expandvars(
     r'%LOCALAPPDATA%\Microsoft\WinGet\Packages\GitHub.cli_Microsoft.Winget.Source_8wekyb3d8bbwe\bin\gh.exe')
@@ -39,17 +41,24 @@ def sha256(path):
 
 
 def build_exe():
-    print('> compilando PainelMinimapa.exe…')
-    subprocess.run([sys.executable, '-m', 'PyInstaller', '--onefile', '--noconsole', '--name', 'PainelMinimapa',
+    print(f'> compilando {EXE_NAME}.exe…')
+    sep = os.pathsep
+    subprocess.run([sys.executable, '-m', 'PyInstaller', '--onefile', '--noconsole', '--name', EXE_NAME,
                     '--paths', APP, '--paths', os.path.join(APP, 'overlay'), '--icon', os.path.join(HERE, 'painel.ico'),
+                    # editor de save (--editor): pagina e banco de itens vao dentro do .exe
+                    '--add-data', f"{os.path.join(APP, 'static', 'index.html')}{sep}static",
+                    '--add-data', f"{os.path.join(APP, 'data', 'game_db.json')}{sep}data",
                     '--distpath', os.path.join(HERE, 'dist'), '--workpath', os.path.join(HERE, 'work'),
                     '--specpath', HERE, '-y', '--log-level', 'WARN', os.path.join(APP, 'overlay', 'painel_minimapa.py')],
                    check=True, cwd=APP)
 
 
 def assemble(version, repo):
-    os.makedirs(os.path.join(PKG, 'painel'), exist_ok=True)
-    shutil.copy2(os.path.join(HERE, 'dist', 'PainelMinimapa.exe'), os.path.join(PKG, 'painel', 'PainelMinimapa.exe'))
+    painel = os.path.join(PKG, 'painel')
+    if os.path.isdir(painel):
+        shutil.rmtree(painel)  # tira o PainelMinimapa.exe de antes da 1.4.0
+    os.makedirs(painel)
+    shutil.copy2(os.path.join(HERE, 'dist', f'{EXE_NAME}.exe'), os.path.join(painel, f'{EXE_NAME}.exe'))
     os.makedirs(os.path.join(PKG, 'visual_moderno'), exist_ok=True)
     for f in ('embervale_minimap_frame.rgba', 'embervale_player_arrow.rgba'):
         shutil.copy2(os.path.join(APP, 'minimap_visual', 'saida', f), os.path.join(PKG, 'visual_moderno', f))
@@ -92,7 +101,7 @@ def make_zip(version, notes):
 def publish(version, repo, notes):
     print(f'> publicando v{version} em github.com/{repo}…')
     subprocess.run([GH, 'release', 'create', f'v{version}', os.path.join(OUT, ZIP_NAME), os.path.join(OUT, 'versao.json'),
-                    '--repo', repo, '--title', f'Minimapa {version}', '--notes', notes or f'Versão {version}'], check=True)
+                    '--repo', repo, '--title', f'Melhorias Enshrouded {version}', '--notes', notes or f'Versão {version}'], check=True)
     print(f'> pronto: https://github.com/{repo}/releases/tag/v{version}')
 
 

@@ -116,10 +116,10 @@ def run_with_window():
         return False
     import tkinter as tk
     root = tk.Tk()
-    root.title('Minimapa — atualização')
-    root.configure(bg='#11161c')
+    root.title('Melhorias Enshrouded — atualização')
+    root.configure(bg='#0c1116')
     root.resizable(False, False)
-    lbl = tk.Label(root, text='Atualizando o minimapa…', fg='#eef2f6', bg='#11161c', font=('Segoe UI', 12), padx=28, pady=22)
+    lbl = tk.Label(root, text='Atualizando o Melhorias Enshrouded…', fg='#eef3f8', bg='#0c1116', font=('Segoe UI', 12), padx=28, pady=22)
     lbl.pack()
     root.update_idletasks()
     w, h = root.winfo_width(), root.winfo_height()
@@ -128,7 +128,7 @@ def run_with_window():
 
     def work():
         def progress(msg):
-            lbl.config(text=f"Minimapa {remote['versao']}: {msg}")
+            lbl.config(text=f"Melhorias Enshrouded {remote['versao']}: {msg}")
             root.update()
         try:
             result['ok'] = download_and_launch(remote, progress)

@@ -24,27 +24,29 @@ from buffs import BuffTimers  # noqa: E402
 # ---------- ajustes ----------
 GAME_EXE = 'enshrouded.exe'
 DEFAULT_PANEL_KEY = 0x77    # F8 (a tecla que abre o painel; pode ser remapeada)
-WIDTH = 400
-ROW_H = 34
+TITLE = 'Melhorias Enshrouded'
+WIDTH = 452
+ROW_H = 42
 FONT = 'Segoe UI'
-C_BG, C_ROW_SEL, C_LINE = '#11161c', '#1c2530', '#232e3a'
-C_TEXT, C_MUTED, C_ACCENT, C_OFF = '#eef2f6', '#8a9aab', '#ffb547', '#3a4654'
+C_BG, C_CARD, C_ROW_SEL, C_LINE = '#0c1116', '#121a22', '#1a2530', '#223040'
+C_TEXT, C_MUTED, C_FAINT, C_OFF = '#eef3f8', '#8d9cad', '#5b6a7a', '#2e3b49'
+C_ACCENT, C_ACCENT_DIM, C_ON_ACCENT = '#ffb547', '#3a2c14', '#1a1206'
 KEY_COLOR = '#010203'         # cor "invisivel" da janela (cantos arredondados)
 WAIT_FOR_GAME_MIN = 30
 GONE_GRACE_S = 120        # o jogo pode sumir e voltar ao iniciar pela Steam: so fecha depois de 2 min sem ele
 
 DEBUG = False   # True registra no painel.log o que acontece ao apertar F8 (diagnostico)
-VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT, VK_RETURN, VK_ESCAPE = 0x26, 0x28, 0x25, 0x27, 0x0D, 0x1B
-NAV_KEYS = {VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT, VK_RETURN, VK_ESCAPE}
+VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT, VK_RETURN, VK_ESCAPE, VK_TAB = 0x26, 0x28, 0x25, 0x27, 0x0D, 0x1B, 0x09
+NAV_KEYS = {VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT, VK_RETURN, VK_ESCAPE, VK_TAB}
 
 POSITIONS = [('bottom-right', 'Embaixo à direita'), ('middle-right', 'Meio à direita'), ('top-right', 'Em cima à direita'),
              ('top-left', 'Em cima à esquerda'), ('middle-left', 'Meio à esquerda'), ('bottom-left', 'Embaixo à esquerda')]
 COLOR_NAMES = {'ambar': 'Âmbar', 'azul': 'Azul', 'verde': 'Verde', 'vermelho': 'Vermelho', 'branco': 'Branco'}
 
 # teclas remapeaveis. _k_panel = a tecla que abre o painel (so do painel); as demais vao para o shroudtopia.json
-KEY_ITEMS = [('_k_panel', 'Tecla: abrir painel'), ('toggle_key', 'Tecla: mostrar/esconder'),
-             ('zoom_in_key', 'Tecla: + zoom'), ('zoom_out_key', 'Tecla: − zoom'),
-             ('size_decrease_key', 'Tecla: diminuir'), ('size_increase_key', 'Tecla: aumentar')]
+KEY_ITEMS = [('_k_panel', 'Abrir este painel'), ('toggle_key', 'Mostrar/esconder minimapa'),
+             ('zoom_in_key', 'Mais zoom'), ('zoom_out_key', 'Menos zoom'),
+             ('size_decrease_key', 'Diminuir minimapa'), ('size_increase_key', 'Aumentar minimapa')]
 _VK_NAMES = {0x08: 'Backspace', 0x09: 'Tab', 0x0D: 'Enter', 0x20: 'Espaço', 0x25: '←', 0x26: '↑', 0x27: '→',
              0x28: '↓', 0x2D: 'Insert', 0x2E: 'Delete', 0x24: 'Home', 0x23: 'End', 0x21: 'PageUp', 0x22: 'PageDown',
              0xBB: '+', 0xBD: '-', 0xBC: ',', 0xBE: '.', 0xBF: '/', 0xC0: '`', 0xDB: '[', 0xDD: ']', 0xDC: '\\',
@@ -120,28 +122,59 @@ def record_option(key, value):
 def record_panel_key(vk):
     record_option('panel_key', int(vk))
 
+
+def installed_version():
+    try:
+        with open(os.path.join(os.path.dirname(_opcoes_path()), 'versao.json'), encoding='utf-8-sig') as f:
+            return json.load(f).get('versao')
+    except (OSError, ValueError):
+        return None
+
+
+def open_editor():
+    """Abre o editor de save (servidor local + navegador) em outro processo."""
+    if getattr(sys, 'frozen', False):
+        import atualizador  # launch_detached: o processo nao pode morrer junto com o painel
+        atualizador.launch_detached([sys.executable, '--editor'])
+    else:
+        import subprocess
+        app = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        subprocess.Popen([sys.executable, os.path.join(app, 'server.py')], cwd=app, creationflags=0x08000000)
+
 # (chave, titulo, tipo, opcoes)  tipo: bool | cycle [(valor, rotulo)] | range (min, max, passo, sufixo)
-ITEMS = [
-    ('active', 'Minimapa ligado', 'bool', None),
-    ('show_world_markers', 'Locais do mapa', 'bool', None),
-    ('show_waypoints', 'Destino marcado', 'bool', None),
-    ('show_other_players', 'Outros jogadores', 'bool', None),
-    ('show_pings', 'Pings', 'bool', None),
-    ('show_death_markers', 'Túmulos', 'bool', None),
-    ('show_fog_of_war', 'Névoa (não explorado)', 'bool', None),
-    ('show_clock', 'Relógio', 'bool', None),
-    ('show_weather', 'Clima', 'bool', None),
-    ('_buffs', 'Tempo dos buffs', 'bool', None),     # fica no opcoes.json, nao no shroudtopia.json
-    ('max_icons', 'Máximo de ícones', 'range', (8, 128, 8, '')),
-    ('position', 'Posição', 'cycle', POSITIONS),
-    ('scale_percent', 'Tamanho', 'cycle', [(n, f'{n}%') for n in (50, 75, 100, 125, 150, 175, 200)]),
-    ('map_orientation', 'Orientação', 'cycle', [('north-up', 'Norte fixo'), ('rotating', 'Gira com você')]),
-    ('map_style', 'Cores do mapa', 'cycle', [('default', 'Colorido (HD)'), ('original', 'Originais')]),
-    ('icon_style', 'Ícones', 'cycle', [('original', 'Originais'), ('world-map', 'Moldura dourada')]),
-    ('map_light', 'Brilho do terreno', 'range', (0, 100, 5, '')),
-    ('map_sample_step', 'Nitidez', 'cycle', [(1, 'Alta'), (2, 'Padrão'), (3, 'Baixa')]),
-    ('_color', 'Cor da moldura *', 'color', None),   # * vale ao reiniciar o jogo
-] + [(k, t, 'key', None) for k, t in KEY_ITEMS]
+#   | color | key | action. Chaves com _ ficam no opcoes.json (sao do painel), as outras no shroudtopia.json.
+TABS = [
+    ('Minimapa', [
+        ('active', 'Minimapa ligado', 'bool', None),
+        ('position', 'Posição', 'cycle', POSITIONS),
+        ('scale_percent', 'Tamanho', 'cycle', [(n, f'{n}%') for n in (50, 75, 100, 125, 150, 175, 200)]),
+        ('map_orientation', 'Orientação', 'cycle', [('north-up', 'Norte fixo'), ('rotating', 'Gira com você')]),
+        ('max_icons', 'Máximo de ícones', 'range', (8, 128, 8, '')),
+        ('show_fog_of_war', 'Névoa (não explorado)', 'bool', None),
+    ]),
+    ('Mostrar', [
+        ('show_clock', 'Relógio do jogo', 'bool', None),
+        ('show_weather', 'Clima', 'bool', None),
+        ('show_world_markers', 'Locais do mapa', 'bool', None),
+        ('show_waypoints', 'Destino marcado', 'bool', None),
+        ('show_other_players', 'Outros jogadores', 'bool', None),
+        ('show_pings', 'Pings', 'bool', None),
+        ('show_death_markers', 'Túmulos', 'bool', None),
+    ]),
+    ('Visual', [
+        ('map_style', 'Cores do mapa', 'cycle', [('default', 'Colorido (HD)'), ('original', 'Originais')]),
+        ('icon_style', 'Ícones', 'cycle', [('original', 'Originais'), ('world-map', 'Moldura dourada')]),
+        ('map_light', 'Brilho do terreno', 'range', (0, 100, 5, '')),
+        ('map_sample_step', 'Nitidez', 'cycle', [(1, 'Alta'), (2, 'Padrão'), (3, 'Baixa')]),
+        ('_color', 'Cor da moldura *', 'color', None),   # * vale ao reiniciar o jogo
+    ]),
+    ('Melhorias', [
+        ('_buffs', 'Tempo dos buffs', 'bool', None),
+        ('_editor', 'Editor de save', 'action', 'Abrir'),
+    ]),
+    ('Teclas', [(k, t, 'key', None) for k, t in KEY_ITEMS]),
+]
+ITEMS = [item for _, items in TABS for item in items]
 
 user32 = ctypes.WinDLL('user32', use_last_error=True)
 kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
@@ -203,7 +236,8 @@ class Panel:
         self.values['_buffs'] = bool(load_option('buffs', True))
         self.panel_key = load_panel_key() or DEFAULT_PANEL_KEY
         self.capturing = None   # item de tecla aguardando a nova tecla, ou None
-        self.sel = 0
+        self.tab, self.sel = 0, 0
+        self.version = installed_version()
         self.open = False
         self.events = deque()
         self.status, self.status_until = '', 0
@@ -266,14 +300,17 @@ class Panel:
             if self.open:
                 self.reload_values()
             return
+        items = TABS[self.tab][1]
         if ev == VK_ESCAPE:
             self.open = False
+        elif ev == VK_TAB:
+            self.tab, self.sel = (self.tab + 1) % len(TABS), 0
         elif ev == VK_UP:
-            self.sel = (self.sel - 1) % len(ITEMS)
+            self.sel = (self.sel - 1) % len(items)
         elif ev == VK_DOWN:
-            self.sel = (self.sel + 1) % len(ITEMS)
+            self.sel = (self.sel + 1) % len(items)
         elif ev in (VK_LEFT, VK_RIGHT, VK_RETURN):
-            self.change(ITEMS[self.sel], -1 if ev == VK_LEFT else 1)
+            self.change(items[self.sel], -1 if ev == VK_LEFT else 1)
 
     def _apply_capture(self, vk):
         item = self.capturing
@@ -315,6 +352,15 @@ class Panel:
                 record_color_choice(new)
                 self.values['_color'] = new
                 self.flash('cor: ' + COLOR_NAMES.get(new, new) + ' — reinicie o jogo')
+            except Exception as e:  # noqa: BLE001
+                self.flash('erro: ' + str(e)[:40])
+            return
+        if kind == 'action':
+            if step < 0:
+                return
+            try:
+                open_editor()
+                self.flash('editor abrindo no navegador…')
             except Exception as e:  # noqa: BLE001
                 self.flash('erro: ' + str(e)[:40])
             return
@@ -368,37 +414,72 @@ class Panel:
             return dict(opts).get(v, str(v))
         return f'{v}{opts[3]}'
 
+    def keycap(self, x, y, text, fill=C_CARD, fg=C_MUTED, size=9):
+        """Desenha uma tecla (ex.: [Tab]) com a ponta esquerda em x; devolve onde ela termina."""
+        w = max(22, 9 + 7 * len(text))
+        self._round(x, y - 10, x + w, y + 10, 6, fill=fill, outline=C_LINE)
+        self.cv.create_text(x + w / 2, y, text=text, fill=fg, font=(FONT, size, 'bold'))
+        return x + w
+
     def draw(self, hint_only=False):
         cv = self.cv
         cv.delete('all')
         if hint_only:
-            w, h = 290, 44
-            self._round(2, 2, w - 2, h - 2, 12, fill=C_BG, outline=C_LINE)
-            cv.create_text(16, h / 2, anchor='w', text='Painel do minimapa:', fill=C_MUTED, font=(FONT, 11))
-            cv.create_text(w - 16, h / 2, anchor='e', text=vk_label(self.panel_key), fill=C_ACCENT, font=(FONT, 12, 'bold'))
+            w, h = 300, 46
+            self._round(2, 2, w - 2, h - 2, 14, fill=C_BG, outline=C_LINE)
+            cv.create_oval(16, h / 2 - 4, 24, h / 2 + 4, fill=C_ACCENT, outline='')
+            cv.create_text(32, h / 2, anchor='w', text=TITLE, fill=C_TEXT, font=(FONT, 11, 'bold'))
+            k = vk_label(self.panel_key)
+            self.keycap(w - 16 - max(22, 9 + 7 * len(k)), h / 2, k, fill=C_ACCENT, fg=C_ON_ACCENT, size=10)
             return w, h
-        head, foot = 58, 46
-        w, h = WIDTH, head + ROW_H * len(ITEMS) + foot
-        self._round(2, 2, w - 2, h - 2, 16, fill=C_BG, outline=C_LINE)
-        cv.create_text(20, 22, anchor='w', text='Minimapa', fill=C_TEXT, font=(FONT, 15, 'bold'))
-        cv.create_text(20, 43, anchor='w', text='mudanças valem na hora', fill=C_MUTED, font=(FONT, 9))
-        self._round(w - 58, 13, w - 18, 37, 8, fill=C_ACCENT, outline='')
-        cv.create_text(w - 38, 25, text=vk_label(self.panel_key), fill='#1a1206', font=(FONT, 10, 'bold'))
-        dim = not self.values.get('active', True)
-        for i, item in enumerate(ITEMS):
-            y = head + i * ROW_H
+        name, items = TABS[self.tab]
+        head, tabs_h, foot = 70, 46, 54
+        w = WIDTH
+        h = head + tabs_h + ROW_H * len(items) + 14 + foot
+        self._round(2, 2, w - 2, h - 2, 18, fill=C_BG, outline=C_LINE)
+        # cabecalho
+        cv.create_oval(22, 24, 34, 36, fill=C_ACCENT, outline='')
+        cv.create_oval(25, 27, 31, 33, fill=C_BG, outline='')
+        cv.create_text(44, 30, anchor='w', text=TITLE, fill=C_TEXT, font=(FONT, 15, 'bold'))
+        sub = 'mudanças valem na hora' + (f'  ·  v{self.version}' if self.version else '')
+        cv.create_text(44, 52, anchor='w', text=sub, fill=C_FAINT, font=(FONT, 9))
+        k = vk_label(self.panel_key)
+        self.keycap(w - 22 - max(22, 9 + 7 * len(k)), 32, k, fill=C_ACCENT, fg=C_ON_ACCENT, size=10)
+        # abas
+        x, ty = 16, head + tabs_h / 2 - 4
+        for i, (tname, _) in enumerate(TABS):
+            tw = 18 + 7.6 * len(tname)
+            if i == self.tab:
+                self._round(x, ty - 14, x + tw, ty + 14, 14, fill=C_ACCENT_DIM, outline='')
+                cv.create_text(x + tw / 2, ty, text=tname, fill=C_ACCENT, font=(FONT, 10, 'bold'))
+            else:
+                cv.create_text(x + tw / 2, ty, text=tname, fill=C_MUTED, font=(FONT, 10))
+            x += tw + 4
+        cv.create_line(16, head + tabs_h, w - 16, head + tabs_h, fill=C_LINE)
+        # linhas
+        dim = self.tab == 0 and not self.values.get('active', True)
+        top = head + tabs_h + 7
+        for i, item in enumerate(items):
+            y = top + i * ROW_H
             sel = i == self.sel
             if sel:
-                self._round(10, y + 2, w - 10, y + ROW_H - 2, 9, fill=C_ROW_SEL, outline='')
-                cv.create_rectangle(10, y + 9, 13, y + ROW_H - 9, fill=C_ACCENT, outline='')
+                self._round(12, y + 3, w - 12, y + ROW_H - 3, 11, fill=C_ROW_SEL, outline='')
+                self._round(12, y + 12, 16, y + ROW_H - 12, 2, fill=C_ACCENT, outline='')
             faded = dim and i > 0
-            cv.create_text(24, y + ROW_H / 2, anchor='w', text=item[1],
+            cv.create_text(30, y + ROW_H / 2, anchor='w', text=item[1],
                            fill=C_MUTED if faded else C_TEXT, font=(FONT, 11, 'bold' if sel else 'normal'))
-            self.draw_value(item, w - 22, y + ROW_H / 2, sel, faded)
+            self.draw_value(item, w - 28, y + ROW_H / 2, sel, faded)
+        # rodape: teclas ou aviso
         fy = h - foot / 2
         cv.create_line(16, h - foot, w - 16, h - foot, fill=C_LINE)
-        msg = self.status if time.time() < self.status_until else '↑↓ escolher   ←→ mudar   Esc fechar'
-        cv.create_text(w / 2, fy, text=msg, fill=C_ACCENT if msg == self.status else C_MUTED, font=(FONT, 10))
+        if time.time() < self.status_until:
+            cv.create_text(w / 2, fy, text=self.status, fill=C_ACCENT, font=(FONT, 10, 'bold'))
+        else:
+            x = 22
+            for cap, what in (('↑↓', 'escolher'), ('←→', 'mudar'), ('Tab', 'aba'), ('Esc', 'fechar')):
+                x = self.keycap(x, fy, cap) + 6
+                cv.create_text(x, fy, anchor='w', text=what, fill=C_FAINT, font=(FONT, 9))
+                x += 7 * len(what) + 16
         return w, h
 
     def draw_value(self, item, x, y, sel, faded):
@@ -408,24 +489,33 @@ class Panel:
         if kind == 'bool':
             on = bool(v)
             col = (C_ACCENT if on else C_OFF) if not faded else C_OFF
-            self._round(x - 40, y - 10, x, y + 10, 10, fill=col, outline='')
-            kx = x - 10 if on else x - 30
-            cv.create_oval(kx - 7, y - 7, kx + 7, y + 7, fill='#1a1206' if on else '#cfd8e0', outline='')
+            self._round(x - 44, y - 12, x, y + 12, 12, fill=col, outline='')
+            kx = x - 12 if on else x - 32
+            cv.create_oval(kx - 8, y - 8, kx + 8, y + 8, fill=C_ON_ACCENT if on else '#c9d3dd', outline='')
             return
         if kind == 'range':
             lo, hi, _, suf = opts
             frac = (v - lo) / (hi - lo) if isinstance(v, (int, float)) else 0
-            cv.create_text(x, y, anchor='e', text=f'{v}{suf}', fill=C_TEXT, font=(FONT, 10, 'bold'))
-            bx0, bx1 = x - 140, x - 40
-            self._round(bx0, y - 3, bx1, y + 3, 3, fill=C_OFF, outline='')
-            self._round(bx0, y - 3, bx0 + max(6, (bx1 - bx0) * frac), y + 3, 3, fill=C_ACCENT, outline='')
+            cv.create_text(x, y, anchor='e', text=f'{v}{suf}', fill=C_ACCENT if sel else C_TEXT, font=(FONT, 10, 'bold'))
+            bx0, bx1 = x - 150, x - 42
+            self._round(bx0, y - 2, bx1, y + 2, 2, fill=C_OFF, outline='')
+            kx = bx0 + (bx1 - bx0) * min(1, max(0, frac))
+            self._round(bx0, y - 2, max(bx0 + 4, kx), y + 2, 2, fill=C_ACCENT, outline='')
+            cv.create_oval(kx - 6, y - 6, kx + 6, y + 6, fill=C_ACCENT if sel else '#c9d3dd', outline='')
+            return
+        if kind == 'action':
+            tw = 22 + 7.5 * len(opts)
+            self._round(x - tw, y - 13, x, y + 13, 13, fill=C_ACCENT if sel else C_CARD,
+                        outline='' if sel else C_LINE)
+            cv.create_text(x - tw / 2, y, text=opts + ' ↗', fill=C_ON_ACCENT if sel else C_TEXT, font=(FONT, 10, 'bold'))
             return
         txt = self.label(item)
-        color = C_TEXT if not faded else C_MUTED
         if sel:
-            txt = f'‹  {txt}  ›'
-            color = C_ACCENT
-        cv.create_text(x, y, anchor='e', text=txt, fill=color, font=(FONT, 10, 'bold' if sel else 'normal'))
+            cv.create_text(x, y, anchor='e', text=f'‹  {txt}  ›', fill=C_ACCENT, font=(FONT, 10, 'bold'))
+            return
+        tw = 20 + 7 * len(txt)
+        self._round(x - tw, y - 12, x, y + 12, 8, fill=C_CARD, outline='')
+        cv.create_text(x - tw / 2, y, text=txt, fill=C_MUTED if faded else C_TEXT, font=(FONT, 10))
 
     def _round(self, x0, y0, x1, y1, r, **kw):
         r = min(r, (x1 - x0) / 2, (y1 - y0) / 2)
@@ -506,12 +596,18 @@ def installed_game_dir():
 
 
 def main():
+    editor = '--editor' in sys.argv
     if getattr(sys, 'frozen', False):
         # no .exe sem console, sys.stderr e None: um erro fecharia o painel sem deixar rastro
         log_dir = os.path.join(os.environ.get('LOCALAPPDATA', ''), 'EnshroudedMinimap')
         os.makedirs(log_dir, exist_ok=True)
-        sys.stdout = sys.stderr = open(os.path.join(log_dir, 'painel.log'), 'a', encoding='utf-8', buffering=1)
-        print(time.strftime('%Y-%m-%d %H:%M:%S'), 'painel iniciado', sys.argv[1:])
+        sys.stdout = sys.stderr = open(os.path.join(log_dir, 'editor.log' if editor else 'painel.log'),
+                                       'a', encoding='utf-8', buffering=1)
+        print(time.strftime('%Y-%m-%d %H:%M:%S'), 'editor iniciado' if editor else 'painel iniciado', sys.argv[1:])
+    if editor:
+        import server  # editor de save: servidor local em 127.0.0.1:8765 + navegador
+        server.main()
+        return
     try:
         ctypes.windll.shcore.SetProcessDpiAwareness(2)
     except (AttributeError, OSError):

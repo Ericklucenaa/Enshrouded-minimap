@@ -1,36 +1,50 @@
-﻿MINIMAPA E RELOGIO DO JOGO PARA ENSHROUDED
-==========================================
+﻿MELHORIAS ENSHROUDED
+====================
 
-Coloca um minimapa no canto da tela e, embaixo dele, a hora do jogo
-(sol de dia, lua de noite) e o clima. Tambem traz um painel dentro do jogo
-para mudar as opcoes do minimapa e permite desativar Altares de Chama
-pelo mapa-mundi.
+Pacote de melhorias para o Enshrouded:
+- Minimapa no canto da tela com a hora do jogo (sol de dia, lua de noite)
+  e o clima.
+- Tempo dos buffs: mostra quanto falta para acabar cada buff de comida,
+  agua e pocao, dentro do proprio circulo do buff.
+- Painel F8 dentro do jogo para mudar todas as opcoes.
+- Editor de save (abre no navegador).
+- Desativar Altares de Chama pelo mapa-mundi.
 
 COMO INSTALAR
 1. Feche o Enshrouded.
-2. De dois cliques em "Instalar Minimap.bat".
+2. De dois cliques em "Instalar Melhorias.bat".
 3. O instalador acha a pasta do jogo sozinho (se nao achar, clique em
    "Procurar..." e escolha a pasta onde esta o enshrouded.exe).
 4. Escolha as opcoes e clique em "Instalar".
-5. Abra o jogo pelo atalho "Jogar Enshrouded com Painel" da Area de
+5. Abra o jogo pelo atalho "Jogar Enshrouded (Melhorias)" da Area de
    Trabalho. E por ele que as atualizacoes chegam sozinhas.
 
 Se aparecer o aviso do Windows "O Windows protegeu o computador", clique em
 "Mais informacoes" e depois em "Executar assim mesmo".
 
 TECLAS NO JOGO
-  F8        abre / fecha o painel do minimapa
-            (setas para escolher e mudar, Esc fecha)
+  F8        abre / fecha o painel (Tab troca de aba, setas escolhem e
+            mudam, Esc fecha)
   F10       mostrar / esconder o minimapa
   + e -     zoom
   F9 / F11  diminuir / aumentar o tamanho
+
+TEMPO DOS BUFFS
+Aparece sozinho dentro dos circulos de buff (canto superior esquerdo).
+Amarelo nos ultimos 5 minutos, vermelho no ultimo minuto. Liga e desliga no
+painel F8, aba Melhorias. Precisa do jogo em "Janela sem bordas".
+
+EDITOR DE SAVE
+Atalho "Editor de Save Enshrouded" na Area de Trabalho (ou painel F8, aba
+Melhorias). Abre no navegador. So grava com o jogo FECHADO e sempre faz
+backup antes, em %LOCALAPPDATA%\EnshroudedMinimap\editor\backups.
 
 DESATIVAR ALTAR DE CHAMA PELO MAPA
 No mapa-mundi, clique no icone de um Altar de Chama seu e confirme com um
 segundo clique. Reative antes que ele se apague.
 
 PARA DESINSTALAR
-Abra o "Instalar Minimap.bat" de novo e clique em "Desinstalar".
+Abra o "Instalar Melhorias.bat" de novo e clique em "Desinstalar".
 Antes de instalar ou desinstalar, o instalador guarda uma copia do que ja
 existia em: Documentos\Enshrouded Minimap Backups
 
