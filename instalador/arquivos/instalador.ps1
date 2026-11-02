@@ -20,6 +20,7 @@ $OLD_FILES = @((Join-Path $LOCAL_DIR 'PainelMinimapa.exe'), (Join-Path $DESKTOP 
 $VISUAL_FILES = @('embervale_minimap_frame.rgba', 'embervale_player_arrow.rgba')
 $VISUALS = [ordered]@{ 'Moderno (recomendado)' = 'moderno'; 'Original (bronze)' = 'original' }
 $ALTAR_DIR = 'XHL-Remote-Altar-Close'      # desativador remoto de altar (XHL), carregado pelo dinput8.dll do XHL
+$SHROUD_DLL = 'shroudtopia.dll'               # entrada da lista do XHL que carrega o Shroudtopia
 $CHAIN_INI = 'dinput8-chain.ini'           # lista de DLLs extras que o carregador do XHL abre junto
 $PREV_DINPUT = 'dinput8-anterior.dll'      # dinput8.dll de outro mod que existia antes (continua carregado)
 
@@ -128,6 +129,12 @@ function Install-Minimap($game, $opts, $log) {
     Backup-Existing $game $log | Out-Null
     foreach ($d in $DLLS) { Copy-Item -LiteralPath (Join-Path $PKG "shroudtopia\$d") -Destination $game -Force }
     & $log 'Carregador Shroudtopia copiado (winmm.dll e shroudtopia.dll).'
+    # Desde a atualização de 02/11/2026 o enshrouded.exe não importa mais o winmm.dll, então o Shroudtopia
+    # (e o minimapa) deixou de carregar. O dinput8.dll do XHL continua sendo importado pelo jogo e abre o
+    # shroudtopia.dll pela lista dinput8-chain.ini.
+    Install-XhlCore $game $log
+    Set-ChainEntries $game (@(Get-ChainEntries $game) + $SHROUD_DLL)
+    & $log 'Shroudtopia agora é carregado pelo dinput8.dll (o jogo não usa mais o winmm.dll).'
 
     $mods = Join-Path $game 'mods'
     $modDir = Join-Path $mods $MOD_ID
@@ -284,7 +291,7 @@ function Set-ChainEntries($game, $entries) {
     [IO.File]::WriteAllText($ini, "[Chain]`r`n" + (($entries | Select-Object -Unique) -join "`r`n") + "`r`n", (New-Object Text.UTF8Encoding $false))
 }
 
-function Install-Altar($game, $log) {
+function Install-XhlCore($game, $log) {
     $ours = Join-Path $PKG 'xhl\dinput8.dll'
     $dst = Join-Path $game 'dinput8.dll'
     if ((Test-Path -LiteralPath $dst) -and -not (Test-IsXhlCore $dst)) {
@@ -294,6 +301,27 @@ function Install-Altar($game, $log) {
         & $log "O dinput8.dll de outro mod foi renomeado para $PREV_DINPUT e continua sendo carregado."
     }
     Copy-Item -LiteralPath $ours -Destination $dst -Force
+}
+
+# tira o carregador do XHL quando nada mais precisa dele (nem mods do XHL nem o Shroudtopia pela lista)
+function Remove-XhlCoreIfUnused($game, $log) {
+    $others = @(Get-ChildItem -LiteralPath (Join-Path $game 'mods') -Directory -ErrorAction SilentlyContinue |
+        Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'native-plugin.ini') })
+    if ($others -or (@(Get-ChainEntries $game) -contains $SHROUD_DLL)) { return }
+    $dll = Join-Path $game 'dinput8.dll'
+    if ((Test-Path -LiteralPath $dll) -and (Test-IsXhlCore $dll)) {
+        Remove-Item -LiteralPath $dll -Force
+        $prev = Join-Path $game $PREV_DINPUT
+        if (Test-Path -LiteralPath $prev) {
+            Move-Item -LiteralPath $prev -Destination $dll -Force   # devolve o dinput8.dll do outro mod
+            Set-ChainEntries $game @(Get-ChainEntries $game | Where-Object { $_ -ne $PREV_DINPUT })
+            & $log 'O dinput8.dll do outro mod voltou ao nome original.'
+        }
+    }
+}
+
+function Install-Altar($game, $log) {
+    Install-XhlCore $game $log
     $mods = Join-Path $game 'mods'
     New-Item -ItemType Directory -Force -Path $mods | Out-Null
     $d = Join-Path $mods $ALTAR_DIR
@@ -306,19 +334,8 @@ function Remove-Altar($game, $log) {
     $d = Join-Path $game "mods\$ALTAR_DIR"
     $had = Test-Path -LiteralPath $d
     if ($had) { Remove-Item -LiteralPath $d -Recurse -Force }
-    # outros mods do XHL (native-plugin.ini) ainda precisam do carregador
-    $others = @(Get-ChildItem -LiteralPath (Join-Path $game 'mods') -Directory -ErrorAction SilentlyContinue |
-        Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'native-plugin.ini') })
-    $dll = Join-Path $game 'dinput8.dll'
-    if (-not $others -and (Test-Path -LiteralPath $dll) -and (Test-IsXhlCore $dll)) {
-        Remove-Item -LiteralPath $dll -Force
-        $prev = Join-Path $game $PREV_DINPUT
-        if (Test-Path -LiteralPath $prev) {
-            Move-Item -LiteralPath $prev -Destination $dll -Force   # devolve o dinput8.dll do outro mod
-            Set-ChainEntries $game @(Get-ChainEntries $game | Where-Object { $_ -ne $PREV_DINPUT })
-            & $log 'O dinput8.dll do outro mod voltou ao nome original.'
-        }
-    }
+    # outros mods do XHL e o Shroudtopia (minimapa) ainda podem precisar do carregador
+    Remove-XhlCoreIfUnused $game $log
     if ($had) { & $log 'Desativador remoto de altar removido.' }
 }
 
@@ -345,6 +362,8 @@ function Uninstall-Minimap($game, $log) {
     }
     $json = Join-Path $game 'shroudtopia.json'
     if (Test-Path -LiteralPath $json) { Remove-Item -LiteralPath $json -Force }
+    Set-ChainEntries $game @(Get-ChainEntries $game | Where-Object { $_ -ne $SHROUD_DLL })
+    Remove-XhlCoreIfUnused $game $log
     foreach ($d in $DLLS) {
         $f = Join-Path $game $d
         if (-not (Test-Path -LiteralPath $f)) { continue }
