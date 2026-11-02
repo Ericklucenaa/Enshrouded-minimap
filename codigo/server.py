@@ -16,7 +16,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from core.character import PlayerCharacter, parse_character_data, set_character_name
-from core.ksd import SaveFile
+from core.ksd import SaveFile, block_hash
 from core.minimap import Minimap, find_game_dir
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -26,13 +26,14 @@ RES_DIR = getattr(sys, '_MEIPASS', APP_DIR)                       # static/ e da
 DATA_DIR = os.path.join(LOCAL_DIR, 'editor') if FROZEN else APP_DIR  # backups, nomes e cache
 BACKUP_DIR = os.path.join(DATA_DIR, 'backups')
 LABELS_FILE = os.path.join(DATA_DIR, 'labels.json')
+QUEUE_FILE = os.path.join(DATA_DIR, 'fila.json')  # alteracoes pendentes sobrevivem a fechar o editor
 IMG_CACHE = os.path.join(DATA_DIR, 'cache', 'img')
 IDLE_EXIT_S = 180  # no .exe nao ha janela para fechar: sai sozinho quando a pagina para de consultar
 last_request = [time.time()]
 WIKI = 'https://enshrouded.wiki.gg'
 WIKI_UA = 'EnshroudedSaveEditor/1.0 (uso pessoal)'
 PORT = 8765
-API_VERSION = 9  # a interface confere isso para detectar um servidor antigo ainda aberto
+API_VERSION = 10  # a interface confere isso para detectar um servidor antigo ainda aberto
 LOCK = threading.Lock()
 SAFE_NAME = re.compile(r"^[\w .,'()&+-]{1,80}$")
 
@@ -361,8 +362,16 @@ class State:
         self.path = None
         self.save = None
         self.mtime = None
+        self.size = None
         self.scan = None  # {'type','block','offsets':[...]}
         self.labels = load_labels()
+        self.base = {}         # hash de cada bloco como esta no disco
+        self.version = 0       # muda sempre que o arquivo e (re)lido; a pagina usa para se atualizar
+        self.ops = []          # alteracoes ainda nao salvas, na ordem: {'path','body','desc'}
+        self.conflicts = []    # alteracoes que nao puderam ser reaplicadas depois que o jogo gravou
+        self.queued = False    # aplicar sozinho assim que o jogo fechar
+        self.sync_error = None
+        self.last_apply = None  # resultado da ultima aplicacao automatica/no menu
 
     def files(self):
         if not self.save_dir:
@@ -374,10 +383,38 @@ class State:
         return out
 
     def open(self, name):
+        """Abre do disco e descarta as alteracoes pendentes."""
         p = os.path.join(self.save_dir, os.path.basename(name))
+        self._load(p)
+        self.ops, self.conflicts, self.queued = [], [], False
+        save_queue()
+
+    def _load(self, p):
+        st = os.stat(p)
         self.save = SaveFile.load(p)
         self.path = p
-        self.mtime = os.path.getmtime(p)
+        self.mtime, self.size = st.st_mtime, st.st_size
+        self.base = {b.name: block_hash(b.data) for b in self.save.blocks}
+        self.version += 1
+        self.sync_error = None
+
+    def sync(self):
+        """O jogo gravou o arquivo? Rele e reaplica por cima as alteracoes ainda nao salvas."""
+        if not self.path:
+            return
+        try:
+            st = os.stat(self.path)
+        except OSError:
+            return
+        if (st.st_mtime, st.st_size) == (self.mtime, self.size):
+            return
+        try:
+            SaveFile.load(self.path)  # o jogo pode estar no meio da gravacao: tenta de novo depois
+        except Exception as e:  # noqa: BLE001
+            self.sync_error = f'{type(e).__name__}: {e}'
+            return
+        self._load(self.path)
+        replay_ops()
 
     def require(self):
         if not self.save:
@@ -428,21 +465,54 @@ def backup_current(reason):
 
 # ---------------- API ----------------
 
+EDIT_ROUTES = ('/api/character/update', '/api/item/update', '/api/item/add', '/api/item/delete',
+               '/api/block/write', '/api/scan/set')
+GET_ROUTES = ('/api/state', '/api/character', '/api/backups', '/api/minimap')  # so leitura
+
+
 def api(method, path, body):
+    S.sync()
+    if path in EDIT_ROUTES:
+        S.require()
+        body = {k: v for k, v in body.items() if not k.startswith('_')}
+        desc = apply_edit(path, body)
+        S.ops.append({'path': path, 'body': body, 'desc': desc})
+        save_queue()
+        return {'ok': True, 'desc': desc}
     if path == '/api/state':
+        gs = game_state()
         return {
             'api_version': API_VERSION,
             'save_dir': S.save_dir, 'all_dirs': find_save_dirs(), 'files': S.files(),
-            'open': os.path.basename(S.path) if S.path else None,
-            'dirty': bool(S.save and S.save.dirty), 'game_running': game_running(), 'game_state': game_state(),
+            'open': os.path.basename(S.path) if S.path else None, 'version': S.version,
+            'dirty': bool(S.ops), 'pending': [o['desc'] for o in S.ops], 'queued': S.queued,
+            'conflicts': S.conflicts, 'sync_error': S.sync_error, 'last_apply': S.last_apply,
+            'game_running': gs != 'closed', 'game_state': gs,
             'info': S.save.info() if S.save else None,
-            'changed_on_disk': bool(S.path and os.path.getmtime(S.path) != S.mtime),
         }
+    if path == '/api/pending/undo':
+        if not S.ops:
+            raise UserError('Nada para desfazer')
+        last = S.ops[-1]
+        S._load(S.path)
+        S.ops.pop()
+        replay_ops()
+        return {'ok': True, 'undone': last['desc']}
+    if path == '/api/conflicts/clear':
+        S.conflicts = []
+        S.last_apply = None
+        return {'ok': True}
+    if path == '/api/queue/cancel':
+        S.queued = False
+        save_queue()
+        return {'ok': True}
     if path == '/api/setdir':
         d = body['dir']
         if not glob.glob(os.path.join(d, '*.ksd')):
             raise UserError('Nenhum arquivo .ksd nessa pasta')
         S.save_dir, S.save, S.path = d, None, None
+        S.ops, S.conflicts, S.queued = [], [], False
+        save_queue()
         return {'ok': True}
     if path == '/api/open':
         S.open(body['file'])
@@ -465,55 +535,10 @@ def api(method, path, body):
         out['db'] = {h: GAME_DB['items'][h] for h in hashes if h in GAME_DB['items']}
         out['skilldb'] = {s['hash']: GAME_DB['skills'][s['hash']] for s in out['skills'] if s['hash'] in GAME_DB['skills']}
         out['game_version'] = GAME_DB.get('game_version', '')
+        out['capacity'] = capacity(S.pc()) if out['inventory_ok'] else None
         return out
     if path == '/api/items/search':
         return {'items': search_items(body.get('q', ''), body.get('type') or None)}
-    if path == '/api/character/update':
-        sv = S.require()
-        pc = S.pc()
-        if 'level' in body:
-            pc.level = int(body['level'])
-            if not 1 <= pc.level <= 100:
-                raise UserError('Nivel deve ficar entre 1 e 100')
-        if 'xp' in body:
-            pc.xp = int(body['xp'])
-        sv.block('player_character').set_data(pc.build())
-        if body.get('name'):
-            cd = sv.block('character_data')
-            cur = parse_character_data(cd.data)['name']
-            if body['name'] != cur:
-                cd.set_data(set_character_name(cd.data, body['name']))
-        return {'ok': True}
-
-    if path in ('/api/item/update', '/api/item/add', '/api/item/delete'):
-        sv = S.require()
-        pc = S.pc()
-        if not pc.inventory_ok:
-            raise UserError('Inventario nao pode ser editado: ' + str(pc.inventory_error))
-        if path == '/api/item/update':
-            it = pc.find(body['where'], int(body['slot']))
-            apply_item_fields(it, body)
-        elif path == '/api/item/add':
-            where = body.get('where', 'backpack')
-            if where not in ('backpack', 'extra'):
-                raise UserError('So da para adicionar itens na mochila')
-            used = {i.slot for i in pc.items(where)}
-            slot = int(body['slot'])
-            if slot in used:
-                raise UserError(f'O slot {slot} ja esta ocupado')
-            if not 0 <= slot <= 79:
-                raise UserError('Slot invalido')
-            new = make_new_item(pc, body)
-            new.slot = slot
-            apply_item_fields(new, body)
-            pc.items(where).append(new)
-        else:
-            if body['where'] not in ('backpack', 'extra'):
-                raise UserError('So da para remover itens da mochila')
-            it = pc.find(body['where'], int(body['slot']))
-            pc.items(body['where']).remove(it)
-        sv.block('player_character').set_data(pc.build())
-        return {'ok': True}
 
     if path == '/api/label':
         h = body['hash'].lower()
@@ -537,17 +562,6 @@ def api(method, path, body):
         off = max(0, int(body.get('offset', 0)))
         ln = min(int(body.get('length', 512)), 4096)
         return {'name': b.name, 'size': len(b.data), 'offset': off, 'hex': b.data[off:off + ln].hex()}
-    if path == '/api/block/write':
-        b = S.require().block(body['name'])
-        off = int(body['offset'])
-        new = bytes.fromhex(body['hex'])
-        if off < 0 or off + len(new) > len(b.data):
-            raise UserError('Escrita fora dos limites do bloco')
-        d = bytearray(b.data)
-        d[off:off + len(new)] = new
-        b.set_data(bytes(d))
-        return {'ok': True}
-
     if path == '/api/scan/new':
         sv = S.require()
         typ, val = body['type'], float(body['value'])
@@ -561,8 +575,6 @@ def api(method, path, body):
     if path == '/api/scan/next':
         if not S.scan:
             raise UserError('Faca um novo scan primeiro')
-        if body.get('reload', True):
-            S.open(os.path.basename(S.path))
         sv = S.require()
         typ, val = S.scan['type'], float(body['value'])
         res = {}
@@ -573,36 +585,22 @@ def api(method, path, body):
                 pass
         S.scan['hits'] = res
         return scan_summary()
-    if path == '/api/scan/set':
-        sv = S.require()
-        typ = S.scan['type'] if S.scan else body['type']
-        fmt, size = SCAN_TYPES[typ]
-        v = float(body['value']) if typ == 'f32' else int(body['value'])
-        b = sv.block(body['block'])
-        d = bytearray(b.data)
-        struct.pack_into(fmt, d, int(body['offset']), v)
-        b.set_data(bytes(d))
-        return {'ok': True}
-
     if path == '/api/save':
-        sv = S.require()
-        # A Steam so rele o tamanho dos arquivos de save quando o jogo abre. Com o jogo aberto (mesmo no menu)
-        # um arquivo de tamanho diferente e rejeitado ("read error (read:X size:Y)") e o jogo grava o antigo por cima.
-        if game_running():
-            raise UserError('Feche o jogo antes de salvar. Com o jogo aberto, mesmo no menu, ele descarta o arquivo editado.')
-        if os.path.getmtime(S.path) != S.mtime:
-            raise UserError('O arquivo mudou no disco depois que voce abriu. Recarregue e refaca as alteracoes.')
-        if not sv.dirty:
+        S.require()
+        if not S.ops:
             raise UserError('Nada para salvar')
-        data = sv.build()
-        stamp = backup_current('Antes de salvar ' + os.path.basename(S.path))
-        tmp = S.path + '.editor-tmp'
-        with open(tmp, 'wb') as f:
-            f.write(data)
-        SaveFile.load(tmp)
-        os.replace(tmp, S.path)
-        S.open(os.path.basename(S.path))
-        return {'ok': True, 'backup': stamp}
+        gs = game_state()
+        if gs == 'closed':
+            S.queued = False
+            return write_save()
+        if body.get('menu'):
+            if gs != 'menu':
+                raise UserError('Isso so funciona com o jogo no menu principal (fora do mundo).')
+            return write_save(same_size=True)
+        # jogo aberto: guarda na fila e aplica sozinho quando o jogo fechar
+        S.queued = True
+        save_queue()
+        return {'ok': True, 'queued': True}
 
     if path == '/api/minimap':
         return MINIMAP.state()
@@ -649,11 +647,271 @@ def api(method, path, body):
     raise UserError('Rota desconhecida: ' + path)
 
 
+# ---------------- alteracoes pendentes (diario) ----------------
+# Cada alteracao fica guardada como (rota, dados). Quando o jogo grava o save, o editor rele o arquivo
+# e reaplica as alteracoes por cima, entao nada se perde e o que o jogo gravou aparece na hora.
+
+BAG_ROWS = {'3b624853': 4, 'baa1776a': 3, 'e0e90a4e': 3, 'f19bc16c': 2, 'de38058e': 2, '1fa74ed7': 1, 'fc3d5c4c': 1}
+ROW = 8
+
+
+def capacity(pc):
+    """Quantos slots existem em cada parte da mochila (base 5 linhas + linhas da bolsa equipada)."""
+    rows = 0
+    for it in pc.equipment:
+        rows = max(rows, BAG_ROWS.get(f'{it.hash:08x}', 0))
+    bp = max([5 * ROW] + [i.slot + 1 for i in pc.backpack])
+    ex = max([rows * ROW] + [i.slot + 1 for i in pc.extra])
+    return {'backpack': bp, 'extra': ex}
+
+
+def item_label(h):
+    e = GAME_DB['items'].get(h if isinstance(h, str) else f'{h:08x}')
+    return e['pt'] if e else f'item {h if isinstance(h, str) else f"{h:08x}"}'
+
+
+AREA = {'backpack': 'mochila', 'extra': 'linhas extras', 'equipment': 'equipado'}
+
+
+def apply_edit(path, body, replay=False):
+    """Aplica uma alteracao no save aberto e devolve uma descricao curta. No replay confere se o
+    item/bloco ainda e o mesmo de quando a alteracao foi feita (o jogo pode ter mexido nele)."""
+    sv = S.require()
+    if path == '/api/character/update':
+        pc = S.pc()
+        if body.get('level') not in (None, ''):
+            lv = int(body['level'])
+            if not 1 <= lv <= 100:
+                raise UserError('Nivel deve ficar entre 1 e 100')
+            pc.level = lv
+        if body.get('xp') not in (None, ''):
+            pc.xp = max(0, int(body['xp']))
+        sv.block('player_character').set_data(pc.build())
+        if body.get('name'):
+            cd = sv.block('character_data')
+            if body['name'] != parse_character_data(cd.data)['name']:
+                cd.set_data(set_character_name(cd.data, body['name']))
+        return 'Personagem: ' + ', '.join(f'{k} {body[k]}' for k in ('name', 'level', 'xp') if body.get(k) not in (None, ''))
+
+    if path in ('/api/item/update', '/api/item/add', '/api/item/delete'):
+        pc = S.pc()
+        if not pc.inventory_ok:
+            raise UserError('Inventario nao pode ser editado: ' + str(pc.inventory_error))
+        where = body.get('where', 'backpack')
+        if where not in AREA:
+            raise UserError('Lugar invalido')
+        if path == '/api/item/add':
+            if where not in ('backpack', 'extra'):
+                raise UserError('So da para adicionar itens na mochila')
+            desc = add_items(pc, where, body, replay)
+        else:
+            slot = int(body['slot'])
+            try:
+                it = pc.find(where, slot)
+            except KeyError:
+                raise UserError(f'Nao ha item no slot {slot} ({AREA[where]})')
+            if body.get('expect') and f'{it.hash:08x}' != body['expect']:
+                raise UserError(f'o slot {slot} agora tem {item_label(it.hash)}')
+            body['expect'] = f'{it.hash:08x}'
+            if path == '/api/item/update':
+                before = item_label(it.hash)
+                apply_item_fields(it, body)
+                desc = f'Editar {before} ({AREA[where]} #{slot})'
+            else:
+                if where not in ('backpack', 'extra'):
+                    raise UserError('So da para remover itens da mochila')
+                pc.items(where).remove(it)
+                desc = f'Remover {item_label(it.hash)} ({AREA[where]} #{slot})'
+        sv.block('player_character').set_data(pc.build())
+        return desc
+
+    # escrita direta em bytes: so e segura se o bloco no disco nao mudou desde que foi feita
+    name = body['name'] if path == '/api/block/write' else body['block']
+    b = sv.block(name)
+    if body.get('base') and S.base.get(name) != body['base']:
+        raise UserError(f'o jogo alterou o bloco {name}; refaca a edicao em bytes')
+    body['base'] = S.base.get(name)
+    d = bytearray(b.data)
+    off = int(body['offset'])
+    if path == '/api/block/write':
+        new = bytes.fromhex(body['hex'])
+        if off < 0 or off + len(new) > len(d):
+            raise UserError('Escrita fora dos limites do bloco')
+        d[off:off + len(new)] = new
+        desc = f'Bytes em {name} @0x{off:x}'
+    else:
+        typ = body.get('type') or (S.scan['type'] if S.scan else None)
+        if typ not in SCAN_TYPES:
+            raise UserError('Tipo de valor desconhecido')
+        body['type'] = typ
+        fmt, size = SCAN_TYPES[typ]
+        if off < 0 or off + size > len(d):
+            raise UserError('Escrita fora dos limites do bloco')
+        struct.pack_into(fmt, d, off, float(body['value']) if typ == 'f32' else int(body['value']))
+        desc = f'Valor {body["value"]} em {name} @0x{off:x}'
+    b.set_data(bytes(d))
+    return desc
+
+
+def add_items(pc, where, body, replay):
+    """Adiciona o item. Quantidade maior que a pilha do jogo vira varias pilhas em slots livres."""
+    entry = GAME_DB['items'].get(str(body.get('hash') or '').lower())
+    total = int(body.get('count') or 1)
+    if not 1 <= total <= 65535 * 40:
+        raise UserError('Quantidade invalida')
+    stack = max(1, int(entry['stack'])) if entry and entry.get('stack') else 65535
+    n = -(-total // stack)
+    cap = capacity(pc)[where]
+    used = {i.slot for i in pc.items(where)}
+    want = int(body.get('slot', 0))
+    if not replay and n == 1:
+        if want in used:
+            raise UserError(f'O slot {want} ja esta ocupado')
+        if not 0 <= want < cap:
+            raise UserError(f'Slot invalido: {AREA[where]} tem {cap} slots')
+    # o slot escolhido primeiro, depois os livres seguintes (no replay, se o jogo ocupou o slot, usa outro livre)
+    order = [want] + [s for s in range(cap) if s != want]
+    slots = [s for s in order if 0 <= s < cap and s not in used][:n]
+    if len(slots) < n:
+        raise UserError(f'Sem espaco: precisa de {n} slot(s) livre(s) em {AREA[where]} e ha {len(slots)}')
+    left = total
+    for s in slots:
+        new = make_new_item(pc, body)
+        new.slot = s
+        apply_item_fields(new, {**body, 'count': min(stack, left)})
+        pc.items(where).append(new)
+        left -= stack
+    name = entry['pt'] if entry else body.get('hash')
+    where_s = f'{AREA[where]} #{slots[0]}' if n == 1 else f'{n} pilhas em {AREA[where]}'
+    return f'Adicionar {total}× {name} ({where_s})'
+
+
+def replay_ops():
+    ops, S.ops = S.ops, []
+    for op in ops:
+        try:
+            op['desc'] = apply_edit(op['path'], op['body'], replay=True)
+            S.ops.append(op)
+        except Exception as e:  # noqa: BLE001
+            S.conflicts.append(f'{op["desc"]}: {e}')
+    if not S.ops:
+        S.queued = False
+    save_queue()
+
+
+def save_queue():
+    try:
+        if S.ops and S.path:
+            with open(QUEUE_FILE, 'w', encoding='utf-8') as f:
+                json.dump({'save_dir': S.save_dir, 'file': os.path.basename(S.path), 'queued': S.queued,
+                           'ops': S.ops}, f, ensure_ascii=False, indent=1)
+        elif os.path.exists(QUEUE_FILE):
+            os.remove(QUEUE_FILE)
+    except OSError:
+        pass
+
+
+def load_queue():
+    """Ao abrir o editor: retoma as alteracoes que estavam pendentes."""
+    try:
+        with open(QUEUE_FILE, encoding='utf-8') as f:
+            q = json.load(f)
+        if q.get('save_dir') and os.path.isdir(q['save_dir']):
+            S.save_dir = q['save_dir']
+        S._load(os.path.join(S.save_dir, q['file']))
+        S.ops, S.queued = q.get('ops', []), bool(q.get('queued'))
+        replay_ops()
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+
+
+def write_save(same_size=False):
+    sv = S.require()
+    # O jogo soma 1 no contador de saves e grava a hora a cada save. Se o arquivo editado ficar com o
+    # mesmo contador da ultima gravacao do jogo, a copia que o servidor do mundo devolve ao entrar
+    # pode ser considerada igual e substituir a editada. Avanca o contador para a edicao ser a mais nova.
+    old_header = bytes(sv.header)
+    counter = struct.unpack_from('<I', sv.header, 0x1C)[0]
+    struct.pack_into('<II', sv.header, 0x1C, counter + 1, int(time.time()))
+    try:
+        data = sv.build(target_size=S.size if same_size else None)
+    except ValueError as e:
+        sv.header[:] = old_header
+        raise UserError(str(e))
+    stamp = backup_current('Antes de salvar ' + os.path.basename(S.path) + (' (jogo no menu)' if same_size else ''))
+    tmp = S.path + '.editor-tmp'
+    with open(tmp, 'wb') as f:
+        f.write(data)
+    SaveFile.load(tmp)
+    os.replace(tmp, S.path)
+    done = [o['desc'] for o in S.ops]
+    S._load(S.path)
+    S.ops, S.queued = [], False
+    save_queue()
+    S.last_apply = {'ok': True, 'when': time.strftime('%H:%M:%S'), 'backup': stamp, 'menu': same_size,
+                    'items': done, 'log_pos': log_size() if same_size else None}
+    return {'ok': True, 'backup': stamp, 'menu': same_size}
+
+
+def log_size():
+    try:
+        return os.path.getsize(GAME_LOG) if GAME_LOG else None
+    except OSError:
+        return None
+
+
+def menu_apply_check():
+    """Depois de aplicar com o jogo no menu: o jogo reclamou do arquivo ao entrar no mundo?"""
+    la = S.last_apply
+    if not la or not la.get('menu') or la.get('log_pos') is None or la.get('verdict'):
+        return
+    try:
+        with open(GAME_LOG, 'rb') as f:
+            f.seek(la['log_pos'])
+            tail = f.read(8 * 1024 * 1024)
+    except OSError:
+        return
+    if re.search(rb'character\d*\.ksd[^\n]*(read error|failed|corrupt)|read error \(read:', tail, re.I):
+        la['verdict'] = 'rejected'
+    elif ENTER_WORLD.search(tail):
+        la['verdict'] = 'entered'
+
+
+def queue_watch():
+    """Aplica a fila sozinho: espera o jogo fechar e o arquivo parar de mudar, entao salva."""
+    closed_at = None
+    while True:
+        time.sleep(3)
+        try:
+            with LOCK:
+                menu_apply_check()
+                if not (S.queued and S.ops and S.path):
+                    closed_at = None
+                    continue
+                if game_running():
+                    closed_at = None
+                    continue
+                closed_at = closed_at or time.time()
+                if time.time() - closed_at < 6 or time.time() - os.path.getmtime(S.path) < 5:
+                    continue
+                S.sync()
+                if S.ops:
+                    write_save()
+                closed_at = None
+        except Exception as e:  # noqa: BLE001
+            S.queued = False
+            S.last_apply = {'ok': False, 'when': time.strftime('%H:%M:%S'), 'error': f'{type(e).__name__}: {e}'}
+            save_queue()
+
+
 def make_new_item(pc, body):
     """Cria o item novo copiando o formato de um item parecido que o personagem ja tem."""
     if body.get('template'):
         tpl_where, tpl_slot = body['template']
-        return pc.find(tpl_where, int(tpl_slot)).copy()
+        try:
+            return pc.find(tpl_where, int(tpl_slot)).copy()
+        except KeyError:
+            pass  # o modelo saiu do lugar (o jogo reorganizou): escolhe outro automaticamente
     h = str(body.get('hash') or '').lower()
     entry = GAME_DB['items'].get(h)
     if not entry:
@@ -748,8 +1006,14 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _host_ok(self):
+        # protege contra sites que tentam falar com o editor pelo navegador (DNS rebinding)
+        return self.headers.get('Host') in (f'127.0.0.1:{PORT}', f'localhost:{PORT}')
+
     def do_GET(self):
         last_request[0] = time.time()
+        if not self._host_ok():
+            return self._send(403, {'error': 'host nao permitido'})
         if self.path in ('/', '/index.html'):
             with open(os.path.join(RES_DIR, 'static', 'index.html'), 'rb') as f:
                 return self._send(200, f.read(), 'text/html; charset=utf-8')
@@ -765,13 +1029,13 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(data)
                 return
             return self._send(404, {'error': 'sem imagem'})
-        if self.path.startswith('/api/'):
+        if self.path.split('?')[0] in GET_ROUTES:
             return self._handle({})
         self._send(404, {'error': 'nao encontrado'})
 
     def do_POST(self):
         last_request[0] = time.time()
-        if self.headers.get('Origin') not in (None, f'http://127.0.0.1:{PORT}', f'http://localhost:{PORT}'):
+        if not self._host_ok() or self.headers.get('Origin') not in (None, f'http://127.0.0.1:{PORT}', f'http://localhost:{PORT}'):
             return self._send(403, {'error': 'origem nao permitida'})
         n = int(self.headers.get('Content-Length') or 0)
         try:
@@ -802,12 +1066,23 @@ def main():
         print(f'O editor ja esta aberto em outra janela ({url}). Feche a outra janela para usar esta versao.')
         webbrowser.open(url)
         return
+    load_queue()
+    if not S.path and S.save_dir:
+        chars = sorted(glob.glob(os.path.join(S.save_dir, 'character*.ksd')), key=os.path.getmtime, reverse=True)
+        try:
+            if chars:
+                S.open(os.path.basename(chars[0]))  # ja abre o personagem mais recente
+        except Exception:  # noqa: BLE001
+            pass
+    threading.Thread(target=queue_watch, daemon=True).start()
     print(f'Enshrouded Save Editor rodando em {url}  (feche esta janela para encerrar)')
+    if S.ops:
+        print(f'{len(S.ops)} alteracao(oes) pendente(s) retomada(s)' + (' - serao aplicadas quando o jogo fechar' if S.queued else ''))
     if '--no-browser' not in sys.argv:
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()
     if FROZEN:
         def idle_watch():
-            while time.time() - last_request[0] < IDLE_EXIT_S:
+            while time.time() - last_request[0] < IDLE_EXIT_S or (S.queued and S.ops):  # com fila, espera o jogo fechar
                 time.sleep(15)
             print(time.strftime('%Y-%m-%d %H:%M:%S'), 'editor encerrado: pagina fechada')
             os._exit(0)

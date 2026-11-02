@@ -41,9 +41,13 @@ Mostra quanto falta para acabar cada buff de comida, água e poção, dentro do 
 
 Abra pelo atalho **"Editor de Save Enshrouded"** ou pelo painel **F8** → aba **Melhorias** → **Abrir**. Ele abre no navegador e mostra personagem, inventário e backups.
 
-- Só grava com o **jogo fechado** (com o jogo aberto, ele descarta o arquivo editado).
+- Acompanha o jogo: quando o jogo grava o save, a tela se atualiza sozinha e as alterações ainda não salvas são reaplicadas por cima. Se o jogo mexeu no mesmo item, aquela alteração é descartada e o editor avisa.
+- Com o **jogo aberto**, dá para editar e clicar em **Aplicar quando o jogo fechar**: assim que o jogo fecha, o editor grava sozinho. A fila fica guardada mesmo se o editor for fechado.
+- Com o jogo no **menu principal**, há o botão experimental **🧪 Aplicar no menu**, que grava um arquivo do mesmo tamanho para o jogo aceitar sem fechar.
+- Quantidade maior que a pilha do jogo vira várias pilhas nos slots livres. Dá para desfazer a última alteração.
+- Ao gravar, avança o contador de saves, para a cópia editada valer como a mais nova ao entrar num mundo online.
 - Sempre faz backup antes de gravar, em `%LOCALAPPDATA%\EnshroudedMinimap\editor\backups`, e restaura pelo próprio editor.
-- Fecha sozinho alguns minutos depois que a página do navegador é fechada.
+- Fecha sozinho alguns minutos depois que a página do navegador é fechada (menos quando há alterações na fila).
 
 ## Desativar Altar de Chama pelo mapa
 

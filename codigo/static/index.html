@@ -103,6 +103,7 @@ th{color:var(--muted);font-weight:500;font-size:12px}
 .banner.warn{background:rgba(246,173,85,.08);border-color:#5a4426;color:#ffe2bd}
 .banner.bad{background:rgba(252,109,109,.08);border-color:#5a2a2a;color:#ffd0d0}
 .banner.info{background:rgba(79,209,197,.07);border-color:#1f4a49;color:#c7f3ee}
+.banner.good{background:rgba(94,227,154,.08);border-color:#25523a;color:#c9f5dc}
 .drawer-bg{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;z-index:20}
 .drawer{position:fixed;top:0;right:0;height:100%;width:min(420px,100%);background:var(--bg2);border-left:1px solid var(--line);z-index:21;transform:translateX(100%);transition:.22s;padding:22px;overflow:auto;display:flex;flex-direction:column;gap:14px}
 .drawer.open{transform:none}.drawer-bg.open{display:block}
@@ -162,8 +163,9 @@ th{color:var(--muted);font-weight:500;font-size:12px}
     <div class="top">
       <h1 id="title">Carregando…</h1>
       <span class="chip" id="gameChip"><span class="dot"></span><span>—</span></span>
-      <span class="chip" id="dirtyChip" style="display:none"><span class="dot"></span>Alterações não salvas</span>
-      <button class="btn" id="reloadBtn" title="Recarregar do disco">↻ Recarregar</button>
+      <span class="chip" id="dirtyChip" style="display:none"><span class="dot"></span><span>Alterações não salvas</span></span>
+      <button class="btn" id="reloadBtn" title="Descartar as alterações pendentes e reler do disco">↻ Recarregar</button>
+      <button class="btn" id="menuBtn" style="display:none" title="Experimental: grava com o jogo aberto no menu principal">🧪 Aplicar no menu</button>
       <button class="btn primary" id="saveBtn" disabled>💾 Salvar no jogo</button>
     </div>
     <div id="banners"></div>
@@ -177,7 +179,7 @@ th{color:var(--muted);font-weight:500;font-size:12px}
 <script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const API_VERSION = 9;
+const API_VERSION = 10;
 const NO_FILE_VIEWS = ['bak', 'map'];  // abas que funcionam sem save aberto
 let ST = null, VIEW = location.hash === '#minimapa' ? 'map' : 'char', CH = null, HEX = {block:null, offset:0, sel:null}, SCAN = null, INVTAB = 'backpack';
 
@@ -197,11 +199,16 @@ async function refresh(){
   f.querySelectorAll('.fbtn').forEach(b => b.onclick = () => openFile(b.dataset.f));
   $('#dir').innerHTML = ST.save_dir ? `📁 ${esc(ST.save_dir)}` : 'Pasta de saves não encontrada';
   const g = $('#gameChip');
-  const GS = {closed:['good','Jogo fechado'], menu:['bad','Jogo aberto no menu — feche para salvar'], playing:['bad','Jogo aberto — feche para salvar']}[ST.game_state] || ['bad','—'];
+  const GS = {closed:['good','Jogo fechado'], menu:['warn','Jogo no menu principal'], playing:['bad','Jogo aberto']}[ST.game_state] || ['bad','—'];
   g.className = 'chip ' + GS[0];
   g.lastElementChild.textContent = GS[1];
   const d = $('#dirtyChip'); d.style.display = ST.dirty ? '' : 'none'; d.className = 'chip warn';
-  $('#saveBtn').disabled = !ST.dirty || ST.game_state !== 'closed';
+  d.lastElementChild.textContent = ST.queued ? `${ST.pending.length} na fila` : `${ST.pending.length} alteração(ões) não salva(s)`;
+  const sb = $('#saveBtn');
+  sb.disabled = !ST.dirty || ST.queued;
+  sb.textContent = ST.game_state === 'closed' ? '💾 Salvar no jogo' : ST.queued ? '⏳ Na fila' : '⏳ Aplicar quando o jogo fechar';
+  $('#menuBtn').style.display = ST.dirty && ST.game_state === 'menu' ? '' : 'none';
+  $('#reloadBtn').textContent = ST.dirty ? '✖ Descartar alterações' : '↻ Recarregar';
   const isChar = ST.info && ST.info.blocks.some(b => b.name === 'player_character');
   document.querySelectorAll('.nbtn').forEach(b => {
     b.classList.toggle('active', b.dataset.v === VIEW);
@@ -209,9 +216,27 @@ async function refresh(){
   });
   let bn = '';
   if(ST.api_version !== API_VERSION) bn += `<div class="banner bad">⛔ <div>Uma versão <b>antiga</b> do editor ainda está aberta e respondendo. Feche <b>todas</b> as janelas pretas do editor e abra o <b>Iniciar Editor.bat</b> de novo.</div></div>`;
-  if(ST.changed_on_disk) bn += `<div class="banner warn">⚠️ <div>O jogo gravou este arquivo depois que você abriu. Clique em <b>Recarregar</b> antes de editar, senão as alterações não podem ser salvas.</div></div>`;
-  if(ST.game_state !== 'closed' && VIEW !== 'map') bn += `<div class="banner bad">⛔ <div>O jogo está <b>aberto</b>. Pode preparar as mudanças, mas para <b>salvar</b> é preciso <b>fechar o jogo</b>: com ele aberto, mesmo no menu principal, a Steam rejeita o arquivo editado e o jogo grava o antigo por cima. Depois de fechar, clique em <b>Recarregar</b>, refaça as mudanças se precisar e salve.</div></div>`;
+  const la = ST.last_apply;
+  if(la && la.ok && !la.menu) bn += `<div class="banner good">✅ <div>Salvo às <b>${esc(la.when)}</b>: ${la.items.map(esc).join(' · ')}. Backup em <code>backups/${esc(la.backup)}</code>. <button class="btn sm" data-clear>ok</button></div></div>`;
+  if(la && la.ok && la.menu) bn += la.verdict === 'rejected'
+      ? `<div class="banner bad">⛔ <div>O jogo <b>recusou</b> o arquivo aplicado no menu às ${esc(la.when)}. Feche o jogo e salve normalmente (refaça as alterações; o backup está em <code>backups/${esc(la.backup)}</code>). <button class="btn sm" data-clear>ok</button></div></div>`
+      : `<div class="banner ${la.verdict==='entered'?'good':'info'}">🧪 <div>Aplicado com o jogo no menu às <b>${esc(la.when)}</b>: ${la.items.map(esc).join(' · ')}. ${la.verdict==='entered'?'Você entrou no mundo sem erro de leitura: confira no jogo se os itens apareceram.':'Entre no mundo e confira se os itens apareceram. Se não aparecerem, feche o jogo e salve normalmente.'} <button class="btn sm" data-clear>ok</button></div></div>`;
+  if(la && !la.ok) bn += `<div class="banner bad">⛔ <div>A aplicação automática falhou às ${esc(la.when)}: ${esc(la.error)} <button class="btn sm" data-clear>ok</button></div></div>`;
+  if(ST.conflicts.length) bn += `<div class="banner warn">⚠️ <div>O jogo gravou o save e estas alterações <b>não puderam ser reaplicadas</b> (foram descartadas):<ul style="margin:6px 0 6px 18px">${ST.conflicts.map(c => `<li>${esc(c)}</li>`).join('')}</ul><button class="btn sm" data-clear>ok</button></div></div>`;
+  if(ST.sync_error) bn += `<div class="banner warn">⏳ <div>O jogo está gravando o save; o editor vai reler assim que terminar.</div></div>`;
+  if(ST.dirty){
+    const msg = ST.queued
+      ? '<b>Na fila:</b> assim que você <b>fechar o jogo</b>, o editor aplica estas alterações sozinho (e faz backup). Pode deixar esta janela aberta e continuar jogando.'
+      : ST.game_state === 'closed' ? 'Alterações ainda <b>não salvas</b>. Clique em <b>Salvar no jogo</b>.'
+      : 'Com o jogo aberto, clique em <b>Aplicar quando o jogo fechar</b>: o editor salva sozinho quando você sair do jogo.' + (ST.game_state==='menu' ? ' Ou tente <b>🧪 Aplicar no menu</b> (experimental, sem fechar o jogo).' : ' Também dá para sair para o <b>menu principal</b> e tentar <b>🧪 Aplicar no menu</b> (experimental).');
+    bn += `<div class="banner ${ST.queued?'info':'warn'}">${ST.queued?'⏳':'📝'} <div>${msg}
+      <ul style="margin:6px 0 6px 18px">${ST.pending.map(p => `<li>${esc(p)}</li>`).join('')}</ul>
+      <button class="btn sm" id="undoBtn">↶ Desfazer a última</button> ${ST.queued?'<button class="btn sm" id="unqueueBtn">Tirar da fila</button>':''}</div></div>`;
+  } else if(ST.game_state !== 'closed' && VIEW !== 'map' && ST.open) bn += `<div class="banner info">🎮 <div>O jogo está aberto. Pode editar normalmente: o editor acompanha o que o jogo grava e, quando você fechar o jogo, aplica as suas alterações sozinho.</div></div>`;
   $('#banners').innerHTML = bn;
+  $('#banners').querySelectorAll('[data-clear]').forEach(b => b.onclick = () => act(() => call('/api/conflicts/clear', {})));
+  const ub = $('#undoBtn'); if(ub) ub.onclick = async () => { const r = await act(() => call('/api/pending/undo', {})); if(r) toast('Desfeito: ' + r.undone); };
+  const qb = $('#unqueueBtn'); if(qb) qb.onclick = () => act(() => call('/api/queue/cancel', {}));
   if(!ST.open && !NO_FILE_VIEWS.includes(VIEW)){ VIEW='none'; }
   $('#title').textContent = ({char:'Personagem',inv:'Inventário',scan:'Caçador de valores',hex:'Blocos do save',bak:'Backups',map:'Minimapa',none:'Escolha um arquivo'})[VIEW];
   await render();
@@ -442,29 +467,39 @@ function itemDrawer(where, slot){
   const del = $('#iDel'); if(del) del.onclick = async () => { if(!confirm('Remover este item da mochila?')) return; const r = await act(() => call('/api/item/delete', {where, slot})); if(r){ closeDrawer(); toast('Item removido'); } };
 }
 function addDrawer(where, used, maxSlot){
-  let free = []; for(let s=0; s<=Math.max(maxSlot+4, 40) && free.length<12; s++) if(!used.has(s)) free.push(s);
+  const cap = (CH.capacity || {})[where] || 40;
+  let free = []; for(let s=0; s<cap; s++) if(!used.has(s)) free.push(s);
+  if(!free.length){ toast(`Não há slot livre em ${where==='extra'?'linhas extras':'mochila'} (${cap} slots)`, 'err'); return; }
   const all = [...CH.backpack.map(i=>['backpack',i]), ...CH.extra.map(i=>['extra',i]), ...CH.equipment.map(i=>['equipment',i])];
   let picked = null;
   openDrawer(`<h3>＋ Adicionar item</h3>
     ${itemSearchBox('ad', 'Ex.: adaga, poção, ferro, Torn Cloth…')}
     <div id="aPick"></div>
     <div class="row">
-      <label class="f">Slot ${where==='extra'?'nas linhas extras':'na mochila'}<select class="in" id="aSlot">${free.map(s => `<option value="${s}">#${s}${s>maxSlot?' (além do último usado)':''}</option>`).join('')}</select></label>
-      <label class="f">Quantidade<input class="in" id="aCount" type="number" min="1" max="65535" value="1"></label>
+      <label class="f">Slot ${where==='extra'?'nas linhas extras':'na mochila'}<select class="in" id="aSlot">${free.map(s => `<option value="${s}">#${s}</option>`).join('')}</select></label>
+      <label class="f">Quantidade total<input class="in" id="aCount" type="number" min="1" value="1"></label>
     </div>
     <details><summary class="hint" style="cursor:pointer">Avançado: escolher o item-modelo</summary>
       <label class="f" style="margin-top:8px">Copiar formato de<select class="in" id="aTpl"><option value="">Automático (recomendado)</option>${all.map(([w,i]) => `<option value="${w}:${i.slot}">${{backpack:'🎒', extra:'➕', equipment:'🛡️'}[w]} #${i.slot} — ${esc(itemName(i.hash))}</option>`).join('')}</select></label>
       <p class="hint">O item novo copia o formato (nível, durabilidade) de um item parecido que você já tem. Armas e armaduras precisam de um modelo do mesmo tipo.</p>
     </details>
-    <div class="banner warn" style="margin:0">⚠️ <div>Se o slot passar da capacidade atual da mochila, o jogo pode descartar o item. Prefira os primeiros slots livres.</div></div>
+    <div class="banner info" style="margin:0">💡 <div>${where==='extra'?'Linhas extras':'Mochila'}: <b>${free.length}</b> de ${cap} slots livres. Quantidade maior que a pilha do jogo é dividida em várias pilhas nos próximos slots livres.</div></div>
+    <p class="hint" id="aSplit"></p>
     <button class="btn primary" id="aGo" disabled>Adicionar</button>`);
   bindItemSearch('ad', i => {
     picked = i; $('#aGo').disabled = false;
     const lv = (DBX[i.hash] || {}).lvl;
     $('#aPick').innerHTML = `<div class="info"><span>Escolhido</span><span><b>${esc(i.pt)}</b> ${typeChip(i.type, i.sub)} ${rarityChip(i.rarity)}</span><span>Pilha máx.</span><span>${i.stack}</span>${lv ? `<span>Nível</span><span>${lv[0] === lv[1] ? 'fixo em ' + lv[0] : lv[0] + ' a ' + lv[1] + ' (ajustado automaticamente)'}</span>` : ''}</div>`;
-    $('#aCount').max = i.stack;
-    $('#aCount').value = Math.min(+$('#aCount').value || 1, i.stack) || 1;
+    $('#aCount').max = i.stack * free.length;
+    $('#aCount').value = Math.min(+$('#aCount').value || 1, i.stack * free.length) || 1;
+    showSplit();
   });
+  const showSplit = () => {
+    if(!picked) return;
+    const n = Math.ceil((+$('#aCount').value || 1) / picked.stack);
+    $('#aSplit').innerHTML = n > 1 ? `Vai ocupar <b>${n}</b> slots (pilhas de ${picked.stack}).` + (n > free.length ? ` <span style="color:var(--bad)">Só há ${free.length} livres.</span>` : '') : '';
+  };
+  $('#aCount').oninput = showSplit;
   $('#aGo').onclick = async () => {
     if(!picked) return;
     const tpl = $('#aTpl').value;
@@ -490,7 +525,7 @@ function renderScan(v){
         <button class="btn primary" id="sNew">Novo scan</button>
         <button class="btn" id="sNext" ${SCAN?'':'disabled'}>Próximo scan (relê o disco)</button>
       </div>
-      <p class="hint">O próximo scan relê o arquivo do disco e descarta alterações que ainda não foram salvas.</p>
+      <p class="hint">O próximo scan usa o que o jogo gravou por último (o editor relê sozinho) e mantém as suas alterações pendentes.</p>
     </div>
     <div class="card">
       <h2>🧭 Como achar os pontos de talento</h2>
@@ -735,10 +770,26 @@ async function renderMap(v){
 
 function go(v){ VIEW = v; refresh(); }
 document.querySelectorAll('.nbtn').forEach(b => b.onclick = () => go(b.dataset.v));
-$('#reloadBtn').onclick = async () => { if(!ST.open) return refresh(); if(ST.dirty && !confirm('Descartar alterações não salvas e recarregar do disco?')) return; await act(() => call('/api/reload', {})); toast('Recarregado do disco'); };
-$('#saveBtn').onclick = async () => { const r = await act(() => call('/api/save', {})); if(r) toast('Salvo! Backup em backups/'+r.backup); };
+$('#reloadBtn').onclick = async () => { if(!ST.open) return refresh(); if(ST.dirty && !confirm('Descartar as alterações não salvas e reler do disco?')) return; await act(() => call('/api/reload', {})); toast('Recarregado do disco'); };
+$('#saveBtn').onclick = async () => { const r = await act(() => call('/api/save', {})); if(r) toast(r.queued ? 'Na fila: será aplicado quando você fechar o jogo' : 'Salvo! Backup em backups/'+r.backup); };
+$('#menuBtn').onclick = async () => {
+  if(!confirm('Experimental: grava o save com o jogo aberto no menu principal. O editor faz backup antes. Depois entre no mundo e confira se os itens apareceram. Continuar?')) return;
+  const r = await act(() => call('/api/save', {menu:true})); if(r) toast('Aplicado. Entre no mundo e confira.');
+};
 window.addEventListener('beforeunload', e => { if(ST && ST.dirty){ e.preventDefault(); e.returnValue=''; } });
-setInterval(async () => { try{ const s = await call('/api/state'); if(s.game_state!==ST.game_state || s.changed_on_disk!==ST.changed_on_disk) refresh(); }catch{} }, 5000);
+// acompanha o jogo: quando ele grava o save (ou a fila e aplicada) a tela se atualiza sozinha
+const sig = s => JSON.stringify([s.version, s.game_state, s.queued, s.pending, s.conflicts, s.last_apply, s.sync_error, s.open]);
+setInterval(async () => {
+  if(!ST) return;
+  try{
+    const s = await call('/api/state');
+    if(sig(s) === sig(ST)) return;
+    const ae = document.activeElement;
+    const typing = ae && ae.closest && ae.closest('#view') && /INPUT|SELECT|TEXTAREA/.test(ae.tagName);
+    if($('#drawer').classList.contains('open') || typing) return;  // espera fechar o painel/campo para nao apagar o que esta sendo digitado
+    refresh();
+  }catch{}
+}, 3000);
 refresh();
 </script>
 </body>

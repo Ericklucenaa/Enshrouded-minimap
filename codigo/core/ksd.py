@@ -45,11 +45,11 @@ class Block:
         self.data = bytes(data)
         self.dirty = True
 
-    def raw(self) -> bytes:
-        if not self.dirty:
+    def raw(self, level=9, force=False) -> bytes:
+        if not self.dirty and not (force and self.compressed):
             return self._raw
         if self.compressed:
-            cctx = zstandard.ZstdCompressor(level=9, write_checksum=False, write_content_size=True)
+            cctx = zstandard.ZstdCompressor(level=level, write_checksum=False, write_content_size=True)
             payload = cctx.compress(self.data)
         else:
             payload = self.data
@@ -91,14 +91,22 @@ class SaveFile:
                 return b
         raise KeyError(name)
 
-    def build(self) -> bytes:
+    def build(self, target_size=None) -> bytes:
+        """Monta o arquivo. Com target_size o resultado fica com exatamente esse tamanho
+        (compressao maxima + zeros a mais antes do indice), para o jogo aberto aceitar o arquivo."""
         out = bytearray(self.header)
         entries = []
         for b in self.blocks:
-            raw = b.raw()
+            raw = b.raw(19, force=True) if target_size else b.raw()
             entries.append((len(out), len(raw), block_hash(raw)))
             out += raw
         out += b'\0' * (-len(out) % 16)
+        if target_size is not None:
+            pad = target_size - len(out) - 20 * len(self.blocks) - len(self.strings)
+            if pad < 0:
+                raise ValueError(f'O save editado ficou {-pad} bytes maior que o original e o jogo aberto '
+                                 'nao aceitaria. Feche o jogo para aplicar.')
+            out += b'\0' * pad
         idx = len(out)
         for k, b in enumerate(self.blocks):
             off, size, h = entries[k]

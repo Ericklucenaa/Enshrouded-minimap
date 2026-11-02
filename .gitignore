@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
 *.log
+fila.json
+*.editor-tmp
+*.bak-antes-review
