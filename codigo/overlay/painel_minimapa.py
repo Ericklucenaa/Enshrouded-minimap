@@ -42,6 +42,7 @@ NAV_KEYS = {VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT, VK_RETURN, VK_ESCAPE, VK_TAB}
 POSITIONS = [('bottom-right', 'Embaixo à direita'), ('middle-right', 'Meio à direita'), ('top-right', 'Em cima à direita'),
              ('top-left', 'Em cima à esquerda'), ('middle-left', 'Meio à esquerda'), ('bottom-left', 'Embaixo à esquerda')]
 COLOR_NAMES = {'ambar': 'Âmbar', 'azul': 'Azul', 'verde': 'Verde', 'vermelho': 'Vermelho', 'branco': 'Branco'}
+THEME_NAMES = {'moderno': 'Moderno', 'vidro': 'Vidro', 'tatico': 'Tático', 'premium': 'Premium', 'original': 'Original (bronze)'}
 
 # teclas remapeaveis. _k_panel = a tecla que abre o painel (so do painel); as demais vao para o shroudtopia.json
 KEY_ITEMS = [('_k_panel', 'Abrir este painel'), ('toggle_key', 'Mostrar/esconder minimapa'),
@@ -166,7 +167,8 @@ TABS = [
         ('icon_style', 'Ícones', 'cycle', [('original', 'Originais'), ('world-map', 'Moldura dourada')]),
         ('map_light', 'Brilho do terreno', 'range', (0, 100, 5, '')),
         ('map_sample_step', 'Nitidez', 'cycle', [(1, 'Alta'), (2, 'Padrão'), (3, 'Baixa')]),
-        ('_color', 'Cor da moldura *', 'color', None),   # * vale ao reiniciar o jogo
+        ('_theme', 'Tema da moldura *', 'theme', None),  # * vale ao reiniciar o jogo
+        ('_color', 'Cor da moldura *', 'color', None),
     ]),
     ('Melhorias', [
         ('_buffs', 'Tempo dos buffs', 'bool', None),
@@ -232,7 +234,7 @@ class Panel:
         self.mm = minimap
         st = minimap.state()
         self.values = st['values']
-        self.values['_color'] = st.get('color') or (minimap.colors() or [''])[0]
+        self._load_theme()
         self.values['_buffs'] = bool(load_option('buffs', True))
         self.panel_key = load_panel_key() or DEFAULT_PANEL_KEY
         self.capturing = None   # item de tecla aguardando a nova tecla, ou None
@@ -340,16 +342,32 @@ class Panel:
             self.capturing = item
             self.flash('aperte a nova tecla (Esc cancela)')
             return
-        if kind == 'color':
-            vals = self.mm.colors()
+        if kind == 'theme':
+            vals = self.mm.themes()
             if not vals:
-                self.flash('sem cores disponíveis')
+                self.flash('sem temas disponíveis')
                 return
             i = vals.index(cur) if cur in vals else 0
             new = vals[(i + step) % len(vals)]
             try:
-                self.mm.set_color(new)
-                record_color_choice(new)
+                theme, color = self.mm.set_theme(new, self.values.get('_color'))
+                record_color_choice(color, theme)
+                self.values['_theme'], self.values['_color'] = theme, color
+                self.flash('tema: ' + THEME_NAMES.get(theme, theme) + ' — reinicie o jogo')
+            except Exception as e:  # noqa: BLE001
+                self.flash('erro: ' + str(e)[:40])
+            return
+        if kind == 'color':
+            theme = self.values.get('_theme') or 'moderno'
+            vals = self.mm.theme_colors(theme)
+            if not vals:
+                self.flash('este tema não tem cores')
+                return
+            i = vals.index(cur) if cur in vals else 0
+            new = vals[(i + step) % len(vals)]
+            try:
+                theme, new = self.mm.set_theme(theme, new)
+                record_color_choice(new, theme)
                 self.values['_color'] = new
                 self.flash('cor: ' + COLOR_NAMES.get(new, new) + ' — reinicie o jogo')
             except Exception as e:  # noqa: BLE001
@@ -390,10 +408,19 @@ class Panel:
             st = self.mm.state()          # pega mudancas feitas pelo editor
             buffs = self.values.get('_buffs', True)
             self.values = st['values']
-            self.values['_color'] = st.get('color') or (self.mm.colors() or [''])[0]
+            self._load_theme()
             self.values['_buffs'] = buffs
         except Exception:  # noqa: BLE001
             pass
+
+    def _load_theme(self):
+        """Lê o tema/cor que estão instalados agora no jogo (pelo conteúdo dos arquivos)."""
+        try:
+            theme, color = self.mm.current_theme()
+        except Exception:  # noqa: BLE001
+            theme, color = None, None
+        self.values['_theme'] = theme or 'moderno'
+        self.values['_color'] = color if theme else (self.mm.colors() or [''])[0]
 
     def flash(self, msg):
         self.status, self.status_until = msg, time.time() + 1.6
@@ -410,6 +437,8 @@ class Panel:
             return vk_label(self.panel_key) if key == '_k_panel' else vk_label(modfmt_to_vk(v))
         if kind == 'color':
             return COLOR_NAMES.get(v, v or '—')
+        if kind == 'theme':
+            return THEME_NAMES.get(v, v or '—')
         if kind == 'cycle':
             return dict(opts).get(v, str(v))
         return f'{v}{opts[3]}'

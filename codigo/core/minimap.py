@@ -201,6 +201,58 @@ class Minimap:
             raise ValueError('Cor indisponivel')
         self._apply(os.path.join(self._cores_dir, name))
 
+    # ---- temas: 'moderno' usa cores/<cor>/, os outros temas/<tema>/<cor>/, 'original' e o bronze ----
+    THEME_ORDER = ('moderno', 'vidro', 'tatico', 'premium', 'original')
+
+    def _theme_dir(self, theme, color):
+        if theme == 'moderno':
+            return os.path.join(self._cores_dir, color)
+        return os.path.join(self.visual_dir, 'temas', theme, color)
+
+    def themes(self):
+        out = []
+        for t in self.THEME_ORDER:
+            if t == 'original':
+                if self._has_visual('original'):
+                    out.append(t)
+            elif self.theme_colors(t):
+                out.append(t)
+        return out
+
+    def theme_colors(self, theme):
+        if theme == 'original':
+            return []
+        base = self._cores_dir if theme == 'moderno' else os.path.join(self.visual_dir, 'temas', theme)
+        if not os.path.isdir(base):
+            return []
+        return [n for n in sorted(os.listdir(base))
+                if all(os.path.exists(os.path.join(base, n, f)) for f in VISUAL_FILES)]
+
+    def current_theme(self):
+        """(tema, cor) instalados agora no jogo, ou (None, None) se for outro visual."""
+        cur = self._sha_mod()
+        for t in self.THEME_ORDER:
+            if t == 'original':
+                if self._has_visual('original') and cur == [_sha(os.path.join(self._visual_src('original'), f)) for f in VISUAL_FILES]:
+                    return 'original', None
+                continue
+            for c in self.theme_colors(t):
+                if cur == [_sha(os.path.join(self._theme_dir(t, c), f)) for f in VISUAL_FILES]:
+                    return t, c
+        return None, None
+
+    def set_theme(self, theme, color=None):
+        if theme == 'original':
+            self.set_visual('original')
+            return 'original', None
+        colors = self.theme_colors(theme)
+        if not colors:
+            raise ValueError('Tema indisponivel')
+        if color not in colors:
+            color = 'ambar' if 'ambar' in colors else colors[0]
+        self._apply(self._theme_dir(theme, color))
+        return theme, color
+
 
 def _sha(path):
     try:
@@ -210,8 +262,8 @@ def _sha(path):
         return None
 
 
-def record_color_choice(name):
-    """Guarda a cor escolhida no opcoes.json do instalador, para a atualizacao nao reseta-la."""
+def record_color_choice(name, theme=None):
+    """Guarda a cor (e o tema) escolhidos no opcoes.json do instalador, para a atualizacao nao reseta-los."""
     try:
         d = os.path.join(os.environ.get('LOCALAPPDATA', ''), 'EnshroudedMinimap')
         if not os.path.isdir(d):
@@ -221,7 +273,10 @@ def record_color_choice(name):
         if os.path.exists(p):
             with open(p, encoding='utf-8-sig') as f:
                 o = json.load(f)
-        o['color'] = name
+        if name:
+            o['color'] = name
+        if theme:
+            o['theme'] = theme
         with open(p, 'w', encoding='utf-8') as f:
             json.dump(o, f, ensure_ascii=False, indent=2)
     except (OSError, ValueError):

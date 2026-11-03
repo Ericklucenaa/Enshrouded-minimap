@@ -143,6 +143,15 @@ function Install-Minimap($game, $opts, $log) {
     Copy-Item -LiteralPath (Join-Path $PKG $MOD_ID) -Destination $mods -Recurse -Force
     & $log "Minimapa copiado para $modDir"
 
+    # O minimapa 0.5.17 precisa estar carregado antes de o jogo criar o Vulkan (~0,3 s depois de abrir);
+    # com a espera padrão do Shroudtopia (3 s) ele não acha a tela e não desenha nada.
+    $boot = Read-Config $game
+    if ($boot -and $boot.bootDelay -ne 0) {
+        $boot | Add-Member -NotePropertyName bootDelay -NotePropertyValue 0 -Force
+        Write-Config $game $boot
+        & $log 'Espera do Shroudtopia zerada (bootDelay 0) para o minimapa pegar a tela do jogo.'
+    }
+
     if ($null -eq $opts) {  # atualização automática: mantém tudo o que a pessoa configurou
         & $log 'Configurações do minimapa mantidas.'
         return
@@ -150,6 +159,7 @@ function Install-Minimap($game, $opts, $log) {
     $cfg = Read-Config $game
     if (-not $cfg) {
         $cfg = Get-Content -LiteralPath (Join-Path $PKG 'shroudtopia\shroudtopia.default.json') -Raw | ConvertFrom-Json
+        $cfg | Add-Member -NotePropertyName bootDelay -NotePropertyValue 0 -Force
         & $log 'shroudtopia.json criado.'
     } else {
         & $log 'shroudtopia.json existente mantido; só a parte do minimapa foi atualizada.'
@@ -184,6 +194,26 @@ function Deploy-Cores($log) {
     $dst = Join-Path $LOCAL_DIR 'cores'
     if (Test-Path -LiteralPath $dst) { Remove-Item -LiteralPath $dst -Recurse -Force }
     Copy-Item -LiteralPath $src -Destination $dst -Recurse -Force
+    # temas extras (vidro, tático, premium) e o bronze original, que o painel F8 também troca
+    foreach ($sub in 'temas', 'original') {
+        $s = Join-Path $PKG $sub
+        if (-not (Test-Path -LiteralPath $s)) { continue }
+        $d = Join-Path $LOCAL_DIR $sub
+        if (Test-Path -LiteralPath $d) { Remove-Item -LiteralPath $d -Recurse -Force }
+        Copy-Item -LiteralPath $s -Destination $d -Recurse -Force
+    }
+}
+
+function Apply-Theme($game, $theme, $color, $log) {
+    # tema escolhido no painel: moderno = cores\<cor>, os outros = temas\<tema>\<cor>, original = bronze
+    if (-not $theme -or $theme -eq 'moderno') { Apply-Color $game $color $log; return }
+    $src = if ($theme -eq 'original') { Join-Path $LOCAL_DIR 'original' } else { Join-Path $LOCAL_DIR "temas\$theme\$color" }
+    if (-not (Test-Path -LiteralPath $src)) { Apply-Color $game $color $log; return }
+    foreach ($f in $VISUAL_FILES) {
+        $sf = Join-Path $src $f
+        if (Test-Path -LiteralPath $sf) { Copy-Item -LiteralPath $sf -Destination (Join-Path $game "mods\$MOD_ID") -Force }
+    }
+    & $log "Tema da moldura: $theme ($color)."
 }
 
 function Apply-Color($game, $color, $log) {
@@ -395,7 +425,7 @@ if ($Atualizar) {
         Set-Visual $game $o.visual $log
         if ($o.painel) { Install-Panel $game $editor $log }
         $color = if ($o.color) { $o.color } else { 'ambar' }
-        Apply-Color $game $color $log
+        Apply-Theme $game $o.theme $color $log
         if ($altar) { Install-Altar $game $log } else { Remove-Altar $game $log }
         Save-LocalInfo $game $o.visual $o.painel $altar $color $buffs $editor
         & $log ('Atualizado para a versão ' + (Get-Content -LiteralPath (Join-Path $PKG 'versao.json') -Raw | ConvertFrom-Json).versao)
