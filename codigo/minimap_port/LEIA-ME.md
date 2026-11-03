@@ -62,3 +62,35 @@ Precisa do Visual Studio 2022 Build Tools (C++):
 ```
 MSBuild minimap_mod.vcxproj /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143
 ```
+
+## Atualização de 03/11/2026 (hotfix do jogo)
+
+`enshrouded.exe` sha256 `ce6fdba6…2147618`. O mapa atual (`final_map.json`) é 26082781 → 03/11;
+o de 02/11 ficou em `final_map_02nov.json`, e o patch do código em `minimap-0.5.17-enshrouded-03nov.patch`.
+
+**Caminho mais rápido para hotfix pequeno:** em vez de refazer tudo a partir das assinaturas,
+traduzir o mapa do build anterior para o novo com `compose.py`. Para isso, **guarde uma cópia do
+`enshrouded.exe` antes de cada atualização**: a Steam sobrescreve o arquivo.
+
+    py compose.py final_map_02nov.json enshrouded_02nov.exe enshrouded_03nov.exe final_map.json
+
+- código: o mesmo trecho (relativos mascarados) perto da posição antiga;
+- dados: as instruções que leem o dado no build antigo, achadas no novo;
+- o que sobrar, conferir à mão. Nesta vez foram 21 de 109:
+  - funções com só um `call` diferente no começo (`0x2b3340`, `0x3071e0`);
+  - tabelas de saltos (`0xbc2554`, `0xc50af8`/`0xc50b00`): todas as entradas −0x20;
+  - slot global `0x281e498`: −0x1000, confirmado por 200 referências;
+  - descritores de sistema: **use o `named.py`** (pelo nome). As referências `lea` enganam aqui;
+  - tabela do clima: o `named.py` também acha.
+- `port.py`: atualizar o `MANUAL`/`REVIEWED` do filtro `0xd8f428` (agora `0xda483d`) e rodar.
+  Deu 0 problemas, com as mesmas diferenças aceitas de 02/11.
+- reaplicar o contador `HUD diag` (está no patch) e compilar.
+
+O que mudou no jogo: o código andou 0 ou −0x20, o `.rdata` e o `.data` −0x1000, e os
+descritores de sistema −0xFC0. Nenhum campo de estrutura mudou.
+
+**Pegadinha do auto-update:** o atalho "Jogar Enshrouded (Melhorias)" reinstala a última
+*release* publicada. Para testar uma DLL nova antes de publicar, abra o jogo **pela Steam**.
+
+O desativador de altar (XHL, ver `../xhl_port`) não precisou de mudança: a DLL corrigida em
+02/11 continua achando tudo no build de 03/11 (`sites +0xC2FB7F +0xC2FE43 +0xD4A6FE +0x31A389`).
