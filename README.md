@@ -8,6 +8,8 @@ Pacote de melhorias para Enshrouded:
 - **Editor de save** que abre no navegador.
 - **Desativar Altar de Chama** pelo mapa-múndi.
 
+[![Apoie no Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/ericklucena)
+
 ## Como instalar
 
 1. Feche o Enshrouded.
@@ -22,7 +24,7 @@ Pacote de melhorias para Enshrouded:
 
 | Tecla | O que faz |
 |---|---|
-| **F8** | Abre e fecha o painel (Tab troca de aba, setas escolhem e mudam, Esc fecha) |
+| **F8** | Abre e fecha o painel (Tab troca de aba, setas escolhem e mudam, Esc fecha). Na aba **Melhorias** fica o link para apoiar o projeto. |
 | **F10** | Mostra / esconde o minimapa |
 | **+ / -** | Zoom |
 | **F9 / F11** | Diminui / aumenta o minimapa |
@@ -80,3 +82,11 @@ Abra o `Instalar Melhorias.bat` de novo e clique em **Desinstalar**. Antes de in
 - Visual moderno, painel F8, tempo dos buffs, editor de save, instalador e atualização automática feitos para este pacote.
 
 Os mods incluídos são distribuídos sob a licença MIT; as licenças estão na pasta `arquivos\licencas` do instalador. Enshrouded é marca da Keen Games; este é um projeto independente da comunidade.
+
+## Apoie o projeto
+
+O Melhorias Enshrouded é grátis. Se ele deixou o seu jogo melhor e você quiser apoiar as próximas atualizações (todo patch do jogo exige portar o minimapa de novo), qualquer valor ajuda:
+
+[![Apoie no Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/ericklucena)
+
+Também dá para abrir a página pelo próprio jogo: painel **F8 → Melhorias → Apoiar o projeto (Ko-fi)**. A doação é opcional e não libera nenhuma função extra.
