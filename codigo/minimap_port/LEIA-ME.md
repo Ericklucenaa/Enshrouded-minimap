@@ -94,3 +94,32 @@ descritores de sistema −0xFC0. Nenhum campo de estrutura mudou.
 
 O desativador de altar (XHL, ver `../xhl_port`) não precisou de mudança: a DLL corrigida em
 02/11 continua achando tudo no build de 03/11 (`sites +0xC2FB7F +0xC2FE43 +0xD4A6FE +0x31A389`).
+
+## Atualização de 04/11/2026
+
+`enshrouded.exe` sha256 `5d9ef2f1…a850c77` (mesmo tamanho do de 03/11: 35.476.040 bytes).
+O mapa atual (`final_map.json`) é 26082781 → 04/11; o de 03/11 ficou em `final_map_03nov.json`,
+e o patch do código em `minimap-0.5.17-enshrouded-04nov.patch`.
+
+Passo a passo usado (o mesmo de 03/11):
+
+    py compose.py final_map_03nov.json enshrouded_03nov.exe enshrouded_04nov.exe final_map.json
+
+- 92 de 109 saíram direto: código **+0xe0**, `.rdata`/`.data` **+0x0**;
+- os 4 de código que faltaram (tabela do menu `0xbc2554` e os trechos `0xc4fc40`, `0xc50af8`, `0xc50b00`)
+  conferidos à mão: iguais em +0xe0, mudando só os relativos;
+- descritores de sistema e tabela do clima: `named.py`, todos no mesmo endereço de 03/11 e batendo
+  com as assinaturas;
+- slot global `0x281e498`: mesmo endereço de 03/11 (`.data` não mudou de tamanho).
+
+`port.py`: `MANUAL`/`REVIEWED` do filtro `0xd8f428` agora `0xda491d`. Deu 0 problemas.
+
+**Código-fonte original:** a pasta de trabalho de 03/11 só tinha o código já portado. O original
+0.5.17 sai desfazendo o patch: `patch -R -p1 < minimap-0.5.17-enshrouded-03nov.patch`.
+
+**Contador `HUD diag`:** em vez de reaplicar à mão, foi feito assim:
+1. rodar o `port.py` de 03/11 no código original (gera a porta de 03/11 sem o contador);
+2. `diff` dessa porta com a de hoje (só endereços);
+3. aplicar esse diff sobre a porta final de 03/11 (que tem o contador).
+
+O desativador de altar (XHL) não precisou de mudança: o `patcount.py` dá as mesmas contagens de 03/11.

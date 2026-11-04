@@ -18,8 +18,8 @@ md = Cs(CS_ARCH_X86, CS_MODE_64); md.detail = True
 M = {int(k, 16): int(v, 16) for k, v in json.load(open(os.path.join(MM, 'final_map.json'))).items()}
 KNOWN_OFFSETS = {(0x828, 0x830), (0x830, 0x838)}   # campo que andou 8 bytes nesta atualização
 # primaryRow: o nop de alinhamento ficou 1 byte menor (66 0f 1f 44 00 00 -> 0f 1f 44 00 00); o resto é igual
-REVIEWED = {(0xd8f428, 0xda483d)}   # 02/11: 0xda485d
-MANUAL = {0xd8f428: 0xda483d}   # 02/11: 0xda485d
+REVIEWED = {(0xd8f428, 0xda491d)}   # 03/11: 0xda483d · 02/11: 0xda485d
+MANUAL = {0xd8f428: 0xda491d}   # 03/11: 0xda483d · 02/11: 0xda485d
 problems = []
 text = [s for s in pe.sections if s.Characteristics & 0x20000000]
 
