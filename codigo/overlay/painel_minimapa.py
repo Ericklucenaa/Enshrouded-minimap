@@ -132,6 +132,14 @@ def installed_version():
         return None
 
 
+DONATE_URL = 'https://ko-fi.com/ericklucena'
+
+
+def open_donate():
+    import webbrowser
+    webbrowser.open(DONATE_URL)
+
+
 def open_editor():
     """Abre o editor de save (servidor local + navegador) em outro processo."""
     if getattr(sys, 'frozen', False):
@@ -173,6 +181,7 @@ TABS = [
     ('Melhorias', [
         ('_buffs', 'Tempo dos buffs', 'bool', None),
         ('_editor', 'Editor de save', 'action', 'Abrir'),
+        ('_donate', 'Apoiar o projeto (Ko-fi)', 'action', 'Abrir'),
     ]),
     ('Teclas', [(k, t, 'key', None) for k, t in KEY_ITEMS]),
 ]
@@ -377,6 +386,10 @@ class Panel:
             if step < 0:
                 return
             try:
+                if key == '_donate':
+                    open_donate()
+                    self.flash('Ko-fi abrindo no navegador. Obrigado!')
+                    return
                 open_editor()
                 self.flash('editor abrindo no navegador…')
             except Exception as e:  # noqa: BLE001
