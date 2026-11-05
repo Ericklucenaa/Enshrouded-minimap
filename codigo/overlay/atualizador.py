@@ -17,6 +17,9 @@ import time
 import urllib.request
 import zipfile
 
+import idioma
+from idioma import t
+
 LOCAL_DIR = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'EnshroudedMinimap')
 VERSION_FILE = os.path.join(LOCAL_DIR, 'versao.json')
 LOG_FILE = os.path.join(LOCAL_DIR, 'atualizacao.log')
@@ -64,11 +67,11 @@ def check():
 
 def download_and_launch(remote, progress=lambda msg: None):
     """Baixa, confere e dispara o instalador. Retorna True se o instalador foi iniciado."""
-    progress(f"Baixando a versão {remote['versao']}…")
+    progress(t('Baixando a versão {v}…').format(v=remote['versao']))
     data = fetch(remote['_base'] + remote['arquivo'], 120)
     if hashlib.sha256(data).hexdigest() != remote['sha256'].lower():
         raise ValueError('arquivo baixado nao confere com o SHA-256 publicado')
-    progress('Instalando…')
+    progress(t('Instalando…'))
     tmp = tempfile.mkdtemp(prefix='minimap-update-')
     zpath = os.path.join(tmp, 'pacote.zip')
     with open(zpath, 'wb') as f:
@@ -115,11 +118,12 @@ def run_with_window():
     if not remote:
         return False
     import tkinter as tk
+    idioma.carregar()
     root = tk.Tk()
-    root.title('Melhorias Enshrouded — atualização')
+    root.title(t('Melhorias Enshrouded — atualização'))
     root.configure(bg='#0c1116')
     root.resizable(False, False)
-    lbl = tk.Label(root, text='Atualizando o Melhorias Enshrouded…', fg='#eef3f8', bg='#0c1116', font=('Segoe UI', 12), padx=28, pady=22)
+    lbl = tk.Label(root, text=t('Atualizando o Melhorias Enshrouded…'), fg='#eef3f8', bg='#0c1116', font=('Segoe UI', 12), padx=28, pady=22)
     lbl.pack()
     root.update_idletasks()
     w, h = root.winfo_width(), root.winfo_height()

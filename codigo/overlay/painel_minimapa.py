@@ -20,6 +20,8 @@ from ctypes import wintypes
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.minimap import Minimap, find_game_dir, record_color_choice  # noqa: E402
 from buffs import BuffTimers  # noqa: E402
+import idioma  # noqa: E402
+from idioma import IDIOMAS, t  # noqa: E402
 
 # ---------- ajustes ----------
 GAME_EXE = 'enshrouded.exe'
@@ -57,11 +59,11 @@ _VK_NAMES = {0x08: 'Backspace', 0x09: 'Tab', 0x0D: 'Enter', 0x20: 'Espaço', 0x2
 
 def vk_label(vk):
     if not vk:
-        return 'nenhuma'
+        return t('nenhuma')
     if 0x70 <= vk <= 0x87:
         return 'F%d' % (vk - 0x6F)
     if vk in _VK_NAMES:
-        return _VK_NAMES[vk]
+        return t(_VK_NAMES[vk])
     if 0x41 <= vk <= 0x5A or 0x30 <= vk <= 0x39:
         return chr(vk)
     if 0x60 <= vk <= 0x69:
@@ -154,6 +156,7 @@ def open_editor():
 #   | color | key | action. Chaves com _ ficam no opcoes.json (sao do painel), as outras no shroudtopia.json.
 TABS = [
     ('Minimapa', [
+        ('_lang', 'Idioma / Language', 'cycle', IDIOMAS),
         ('active', 'Minimapa ligado', 'bool', None),
         ('position', 'Posição', 'cycle', POSITIONS),
         ('scale_percent', 'Tamanho', 'cycle', [(n, f'{n}%') for n in (50, 75, 100, 125, 150, 175, 200)]),
@@ -245,6 +248,7 @@ class Panel:
         self.values = st['values']
         self._load_theme()
         self.values['_buffs'] = bool(load_option('buffs', True))
+        self.values['_lang'] = idioma.carregar()
         self.panel_key = load_panel_key() or DEFAULT_PANEL_KEY
         self.capturing = None   # item de tecla aguardando a nova tecla, ou None
         self.tab, self.sel = 0, 0
@@ -329,32 +333,39 @@ class Panel:
         if item is None:
             return
         if vk == VK_ESCAPE:
-            self.flash('cancelado')
+            self.flash(t('cancelado'))
             return
         key = item[0]
         if key == '_k_panel':
             self.panel_key = vk
             record_panel_key(vk)
-            self.flash('abrir painel: ' + vk_label(vk))
+            self.flash(t('abrir painel: ') + vk_label(vk))
             return
         try:
             self.mm.save({key: vk_to_modfmt(vk)})   # tecla do mod -> shroudtopia.json
             self.values[key] = vk_to_modfmt(vk)
-            self.flash(vk_label(vk) + ' — pode pedir reiniciar')
+            self.flash(vk_label(vk) + t(' — pode pedir reiniciar'))
         except Exception as e:  # noqa: BLE001
-            self.flash('erro: ' + str(e)[:40])
+            self.flash(t('erro: ') + str(e)[:40])
 
     def change(self, item, step):
         key, _, kind, opts = item
         cur = self.values.get(key)
         if kind == 'key':
             self.capturing = item
-            self.flash('aperte a nova tecla (Esc cancela)')
+            self.flash(t('aperte a nova tecla (Esc cancela)'))
+            return
+        if key == '_lang':
+            vals = [v for v, _ in opts]
+            new = vals[((vals.index(cur) if cur in vals else 0) + step) % len(vals)]
+            self.values['_lang'] = idioma.definir(new)
+            record_option('idioma', new)
+            self.flash(t('✔ idioma: Português'))
             return
         if kind == 'theme':
             vals = self.mm.themes()
             if not vals:
-                self.flash('sem temas disponíveis')
+                self.flash(t('sem temas disponíveis'))
                 return
             i = vals.index(cur) if cur in vals else 0
             new = vals[(i + step) % len(vals)]
@@ -362,15 +373,15 @@ class Panel:
                 theme, color = self.mm.set_theme(new, self.values.get('_color'))
                 record_color_choice(color, theme)
                 self.values['_theme'], self.values['_color'] = theme, color
-                self.flash('tema: ' + THEME_NAMES.get(theme, theme) + ' — reinicie o jogo')
+                self.flash(t('tema: ') + t(THEME_NAMES.get(theme, theme)) + t(' — reinicie o jogo'))
             except Exception as e:  # noqa: BLE001
-                self.flash('erro: ' + str(e)[:40])
+                self.flash(t('erro: ') + str(e)[:40])
             return
         if kind == 'color':
             theme = self.values.get('_theme') or 'moderno'
             vals = self.mm.theme_colors(theme)
             if not vals:
-                self.flash('este tema não tem cores')
+                self.flash(t('este tema não tem cores'))
                 return
             i = vals.index(cur) if cur in vals else 0
             new = vals[(i + step) % len(vals)]
@@ -378,9 +389,9 @@ class Panel:
                 theme, new = self.mm.set_theme(theme, new)
                 record_color_choice(new, theme)
                 self.values['_color'] = new
-                self.flash('cor: ' + COLOR_NAMES.get(new, new) + ' — reinicie o jogo')
+                self.flash(t('cor: ') + t(COLOR_NAMES.get(new, new)) + t(' — reinicie o jogo'))
             except Exception as e:  # noqa: BLE001
-                self.flash('erro: ' + str(e)[:40])
+                self.flash(t('erro: ') + str(e)[:40])
             return
         if kind == 'action':
             if step < 0:
@@ -388,17 +399,17 @@ class Panel:
             try:
                 if key == '_donate':
                     open_donate()
-                    self.flash('Ko-fi abrindo no navegador. Obrigado!')
+                    self.flash(t('Ko-fi abrindo no navegador. Obrigado!'))
                     return
                 open_editor()
-                self.flash('editor abrindo no navegador…')
+                self.flash(t('editor abrindo no navegador…'))
             except Exception as e:  # noqa: BLE001
-                self.flash('erro: ' + str(e)[:40])
+                self.flash(t('erro: ') + str(e)[:40])
             return
         if key == '_buffs':
             self.values['_buffs'] = not cur
             record_option('buffs', not cur)
-            self.flash('✔ tempo dos buffs ' + ('ligado' if not cur else 'desligado'))
+            self.flash(t('✔ tempo dos buffs ligado') if not cur else t('✔ tempo dos buffs desligado'))
             return
         if kind == 'bool':
             new = not cur
@@ -412,9 +423,9 @@ class Panel:
         try:
             self.mm.save({key: new})
             self.values[key] = new
-            self.flash('✔ aplicado')
+            self.flash(t('✔ aplicado'))
         except Exception as e:  # noqa: BLE001 - mostra no painel em vez de fechar
-            self.flash('erro: ' + str(e)[:40])
+            self.flash(t('erro: ') + str(e)[:40])
 
     def reload_values(self):
         try:
@@ -423,6 +434,7 @@ class Panel:
             self.values = st['values']
             self._load_theme()
             self.values['_buffs'] = buffs
+            self.values['_lang'] = idioma.atual()
         except Exception:  # noqa: BLE001
             pass
 
@@ -446,14 +458,14 @@ class Panel:
             return None
         if kind == 'key':
             if self.capturing is item:
-                return '[aperte…]'
+                return t('[aperte…]')
             return vk_label(self.panel_key) if key == '_k_panel' else vk_label(modfmt_to_vk(v))
         if kind == 'color':
-            return COLOR_NAMES.get(v, v or '—')
+            return t(COLOR_NAMES.get(v, v or '—'))
         if kind == 'theme':
-            return THEME_NAMES.get(v, v or '—')
+            return t(THEME_NAMES.get(v, v or '—'))
         if kind == 'cycle':
-            return dict(opts).get(v, str(v))
+            return t(dict(opts).get(v, str(v)))
         return f'{v}{opts[3]}'
 
     def keycap(self, x, y, text, fill=C_CARD, fg=C_MUTED, size=9):
@@ -483,13 +495,14 @@ class Panel:
         cv.create_oval(22, 24, 34, 36, fill=C_ACCENT, outline='')
         cv.create_oval(25, 27, 31, 33, fill=C_BG, outline='')
         cv.create_text(44, 30, anchor='w', text=TITLE, fill=C_TEXT, font=(FONT, 15, 'bold'))
-        sub = 'mudanças valem na hora' + (f'  ·  v{self.version}' if self.version else '')
+        sub = t('mudanças valem na hora') + (f'  ·  v{self.version}' if self.version else '')
         cv.create_text(44, 52, anchor='w', text=sub, fill=C_FAINT, font=(FONT, 9))
         k = vk_label(self.panel_key)
         self.keycap(w - 22 - max(22, 9 + 7 * len(k)), 32, k, fill=C_ACCENT, fg=C_ON_ACCENT, size=10)
         # abas
         x, ty = 16, head + tabs_h / 2 - 4
         for i, (tname, _) in enumerate(TABS):
+            tname = t(tname)
             tw = 18 + 7.6 * len(tname)
             if i == self.tab:
                 self._round(x, ty - 14, x + tw, ty + 14, 14, fill=C_ACCENT_DIM, outline='')
@@ -507,8 +520,8 @@ class Panel:
             if sel:
                 self._round(12, y + 3, w - 12, y + ROW_H - 3, 11, fill=C_ROW_SEL, outline='')
                 self._round(12, y + 12, 16, y + ROW_H - 12, 2, fill=C_ACCENT, outline='')
-            faded = dim and i > 0
-            cv.create_text(30, y + ROW_H / 2, anchor='w', text=item[1],
+            faded = dim and item[0] not in ('_lang', 'active')
+            cv.create_text(30, y + ROW_H / 2, anchor='w', text=t(item[1]),
                            fill=C_MUTED if faded else C_TEXT, font=(FONT, 11, 'bold' if sel else 'normal'))
             self.draw_value(item, w - 28, y + ROW_H / 2, sel, faded)
         # rodape: teclas ou aviso
@@ -519,6 +532,7 @@ class Panel:
         else:
             x = 22
             for cap, what in (('↑↓', 'escolher'), ('←→', 'mudar'), ('Tab', 'aba'), ('Esc', 'fechar')):
+                what = t(what)
                 x = self.keycap(x, fy, cap) + 6
                 cv.create_text(x, fy, anchor='w', text=what, fill=C_FAINT, font=(FONT, 9))
                 x += 7 * len(what) + 16
@@ -546,6 +560,7 @@ class Panel:
             cv.create_oval(kx - 6, y - 6, kx + 6, y + 6, fill=C_ACCENT if sel else '#c9d3dd', outline='')
             return
         if kind == 'action':
+            opts = t(opts)
             tw = 22 + 7.5 * len(opts)
             self._round(x - tw, y - 13, x, y + 13, 13, fill=C_ACCENT if sel else C_CARD,
                         outline='' if sel else C_LINE)

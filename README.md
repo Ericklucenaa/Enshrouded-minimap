@@ -4,7 +4,7 @@ Pacote de melhorias para Enshrouded:
 
 - **Minimapa** no canto da tela com a hora do jogo (sol de dia, lua de noite) e o clima, com visual moderno.
 - **Tempo dos buffs**: quanto falta para acabar cada buff de comida, água e poção, dentro do próprio círculo do buff.
-- **Painel F8** dentro do jogo, com abas, para mudar todas as opções na hora.
+- **Painel F8** dentro do jogo, com abas, para mudar todas as opções na hora. Em **Português, English e Español**.
 - **Editor de save** que abre no navegador.
 - **Desativar Altar de Chama** pelo mapa-múndi.
 
@@ -24,7 +24,7 @@ Pacote de melhorias para Enshrouded:
 
 | Tecla | O que faz |
 |---|---|
-| **F8** | Abre e fecha o painel (Tab troca de aba, setas escolhem e mudam, Esc fecha). Na aba **Melhorias** fica o link para apoiar o projeto. |
+| **F8** | Abre e fecha o painel (Tab troca de aba, setas escolhem e mudam, Esc fecha). A primeira linha, **Idioma / Language**, troca o idioma do painel (Português, English, Español). Na aba **Melhorias** fica o link para apoiar o projeto. |
 | **F10** | Mostra / esconde o minimapa |
 | **+ / -** | Zoom |
 | **F9 / F11** | Diminui / aumenta o minimapa |
